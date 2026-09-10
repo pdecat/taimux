@@ -1,0 +1,25 @@
+name: Feature request
+description: Something taimux should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: >
+        The situation rather than the solution. taimux is deliberately small and
+        stays a picker over the tmux you already run, so the most useful thing
+        you can describe is the moment it let you down.
+    validations: {required: true}
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you had in mind
+    validations: {required: false}
+  - type: markdown
+    attributes:
+      value: |
+        If you want a full agent runtime with its own panes, persistence and
+        orchestration, [herdr](https://github.com/herdrdev/herdr) does that and
+        does it well. Saying so is not a brush-off: knowing which of the two
+        you actually want saves everybody time.

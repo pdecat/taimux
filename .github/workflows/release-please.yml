@@ -1,0 +1,137 @@
+# Versioning and releases, off the commit messages.
+#
+# The commits here are already Conventional Commits, so the version does not
+# need deciding: release-please reads the history, keeps a release PR open with
+# the next version and the changelog it implies, and merging that PR is what cuts
+# the release. Nothing is tagged by hand.
+#
+# What comes out is a tagged GitHub Release with the statically linked binary
+# attached under a STABLE asset name.
+#
+# **The attach jobs below run `if: always()`, and that is the whole design.**
+# Three releases went out empty before this shape was found, for two different
+# reasons:
+#
+#   - v0.7.0 and v0.8.0: release-please tagged and published the release, then
+#     failed a moment later on a GitHub GraphQL error while scanning commits for
+#     the NEXT release. The jobs needed its outputs, so they skipped.
+#   - v0.9.0: the jobs were moved to a separate workflow keyed on
+#     `release: published`, which never fired at all. A workflow cannot be
+#     triggered by an event that GITHUB_TOKEN raised, and release-please
+#     publishes with `github.token`. GitHub does this to stop workflows
+#     recursing, and it applies to `push: tags` just the same, so that is not a
+#     way round it either.
+#
+# So the attach step trusts nothing about how this run went. It asks the API
+# whether a release exists for the version in Cargo.toml, and attaches to it if
+# one does and it is missing its asset. A run where release-please did nothing
+# finds no release and exits quietly. That is how the other hosts
+# get taimux, since two of them cannot build it (no cargo) and a plain build
+# here would not run there anyway (glibc 2.43 on one, 2.41 on another). See
+# scripts/install-release.sh, which is the downloader, and the dotfiles repo's
+# run_after_30-install-taimux.sh, which calls the same API.
+#
+# Config lives in release-please-config.json plus .release-please-manifest.json.
+# The parts worth knowing, since JSON cannot hold a comment:
+#
+#   - The package is `daemon`, because that is where Cargo.toml is, and
+#     `release-type: rust` is what bumps the crate version and Cargo.lock. The
+#     version in Cargo.toml is what `taimux version` prints, so the tag, the
+#     crate and the binary cannot drift apart.
+#   - `include-component-in-tag: false` keeps the tags `v0.2.0` rather than
+#     `daemon-v0.2.0`, since there is only one thing here to release.
+#   - `bump-minor-pre-major: true`: pre-1.0, a breaking change bumps the minor
+#     instead of jumping to 1.0.0.
+#   - Only feat, fix, perf and refactor are visible in the changelog, and
+#     **visible means release-triggering**: there is no show-without-releasing in
+#     release-please. refactor is deliberately in that list, because the change
+#     that replaced the entire bash implementation was a refactor and a host
+#     should get it. docs, test, ci, build, chore and style are hidden, so a
+#     comment fix does not cut a release.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # The one third-party action in this repo, and the exception is deliberate
+      # rather than an oversight: ci.yml sticks to first-party `actions/*` on the
+      # grounds that anything else is a third party with write access to a build
+      # that produces the binary this tool runs as. release-please is Google's,
+      # it runs only on main, and the alternative is running the same npm
+      # package by hand from a shell step, which is the same code with more of it
+      # written here. It does not build or sign anything: it opens a PR.
+      - uses: googleapis/release-please-action@v5
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # Built whatever release-please did, because whether a release exists is a
+  # question for the API rather than for that job's exit code.
+  build:
+    needs: release-please
+    if: always()
+    uses: ./.github/workflows/build.yml
+
+  attach:
+    needs: [release-please, build]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: taimux-x86_64-static
+
+      # A STABLE asset name, not one carrying the version: the installer looks
+      # the asset up by name in whatever release is latest, so putting the
+      # version in it would make every downloader parse a filename to find the
+      # file it already knows it wants.
+      - name: attach it, if there is a release to attach it to
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The version this commit builds, which is what release-please just
+          # bumped if it did anything.
+          v=$(sed -n '/^\[package\]/,/^\[/p' Cargo.toml |
+              sed -n 's/^version = "\(.*\)"/\1/p' | head -1)
+          test -n "$v"
+          tag="v$v"
+
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "no release $tag: nothing was cut by this run, nothing to attach"
+            exit 0
+          fi
+
+          chmod +x taimux
+          mv taimux taimux-x86_64-linux-musl
+
+          # The binary must agree with the tag it is published under. This check
+          # was only in the installer before, one download too late, and it is
+          # the failure nothing else can see: `taimux version` is how a host
+          # decides whether it is current, so a mislabelled asset makes every
+          # host either re-download forever or never upgrade.
+          got=$(./taimux-x86_64-linux-musl version | awk '{print $2}')
+          if [ "$got" != "$v" ]; then
+            echo "refusing: $tag carries a binary saying $got" >&2
+            exit 1
+          fi
+
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber \
+            taimux-x86_64-linux-musl
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets \
+            -q '.assets[] | "\(.name)  \(.size) bytes"'

@@ -1,0 +1,12 @@
+%10	work:1.1	/home/testuser/proj/web	claude	2.1.229	input	acceptEdits	✳ Refactor the auth layer
+%11	work:1.2	/home/testuser	gemini	0.41.2	run	-	⠂ tests
+%12	ops:3.1	/home/testuser/longdir/another-very-long-project-name-here	codex		idle	-	◐ X
+%13	ops:12.11	/home/testuser/x/y	opencode	1.18.10	idle	bypassPermissions	a long summary that runs past the right edge of a narrow window and then some
+%14	main:4.1	/	pi	0.9.4	run	auto	
+%15	main2:5.1	/home/testuser/a	claude	2.1.258	idle	default	main2 beside main
+%16	master:6.1	/home/testuser/b	claude		input	plan	no version at all
+%17	mast:7.1	/home/testuser/c	claude	2.1.100	idle	-	a name that is a prefix of another
+ha:%6	main:1.7	/home/other/work	claude	2.1.100	run	default	over on another host
+laptop-two:%2	main:2.2	/home/jordan	claude	2.1.99	idle	acceptEdits	a second host
+laptop-two:unreachable	laptop-two: no answer					note		
+dead:/home/testuser/.claude/projects/p/abc.jsonl	3d	/home/testuser/proj/web	claude	2.1.90	dead	-	an ended conversation

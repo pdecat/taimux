@@ -1,0 +1,8 @@
+# Agent-local state. Ignored globally on the author's machine, but a public repo
+# cannot rely on a contributor having that: settings.local.json records whatever
+# tool permissions someone granted in their own checkout, which is theirs and not
+# this project's.
+.claude/
+
+# One target dir for the whole workspace, at the root.
+/target/

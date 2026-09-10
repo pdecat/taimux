@@ -1,0 +1,85 @@
+# Build and test on every push and pull request.
+#
+# Only first-party `actions/*` are used here, deliberately. The convenience
+# actions for Rust (toolchain setup, caching) are widely used and would shorten
+# this file, but every one of them is a third party with write access to a build
+# that produces the binary this tool runs as, and the runner image already ships
+# rustup. The cost of doing without them is about eight lines.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# One run per ref: a push that lands while an earlier one is still going makes
+# that earlier answer irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # jq does the settings.json merge that `install-hooks` is tested through,
+      # shellcheck lints what shell is left, and tmux is not strictly needed (the
+      # suite passes without it, and provides its own fake where the command line
+      # is what matters) but its presence makes the paths that call the real one
+      # actually run rather than always taking the "tmux said nothing" branch.
+      - name: install what the suite reaches for
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends jq shellcheck tmux
+
+      - name: toolchain
+        run: rustup component add clippy rustfmt
+
+      # Keyed on the lockfile, so a dependency bump invalidates it and nothing
+      # else does. `target/` is included because the test build is most of the
+      # work here.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: fmt
+        run: cargo fmt --all --check
+
+      - name: clippy
+        run: cargo clippy --workspace --release --all-targets -- -D warnings
+
+      # The crate's own tests: parsing, the layout, the conversation ladder, the
+      # restart guards. These reach the pure functions directly.
+      - name: unit tests
+        run: cargo test --workspace --release
+
+      - name: build
+        run: cargo build --release
+
+      # Same list as the justfile's `scripts`. install-release.sh is #!/bin/sh on
+      # purpose, so shellcheck holds it to POSIX and catches a bashism that would
+      # only show up on a host running dash.
+      - name: shellcheck what shell is left
+        run: |
+          for f in taimux.tmux scripts/install-release.sh tests/run.sh demo/demo.sh; do
+            bash -n "$f"
+          done
+          shellcheck -S warning taimux.tmux scripts/install-release.sh \
+            tests/run.sh demo/demo.sh
+
+      # Integration: the binary, in fixtures, asserted on what it produced. This
+      # also replays tests/golden/rows.expected, which is the frozen bash layout
+      # output and the one check that cannot be regenerated.
+      - name: integration tests
+        run: bash tests/run.sh

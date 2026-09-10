@@ -1,0 +1,30 @@
+# Everything a person looks at, and the only crate that links a terminal library.
+#
+# The four dependencies are deliberate and were once zero. The stack is atuin's
+# rather than one invented here: proven on these machines and already in the
+# local cargo cache.
+[package]
+name = "taimux-cli"
+version = "0.9.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "The taimux picker: the TUI, the row layout, restart, resurrect and ssh federation."
+
+[dependencies]
+taimux-core = { workspace = true }
+
+# layout and chrome. atuin reaches for Constraint, Borders, Block and Paragraph
+# constantly and writes its own list as a custom StatefulWidget, which settled the
+# question: ratatui earns its place on chrome, and stops earning it at the list.
+ratatui = "0.30"
+# raw mode, the alternate screen, key events, resize, and BRACKETED PASTE, which
+# is the whole reason the picker could stop being fzf: a paste arrives as its own
+# event and can never be mistaken for Enter.
+crossterm = { version = "0.29", features = ["use-dev-tty"] }
+# display width done properly, rather than stripping UTF-8 continuation bytes by
+# hand and silently miscounting double-width characters.
+unicode-width = "0.2"
+# the fzf-lineage fuzzy matcher, so filtering feels like it always did
+fuzzy-matcher = "0.3.7"

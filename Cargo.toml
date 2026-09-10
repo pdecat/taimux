@@ -1,0 +1,58 @@
+# One binary, four crates.
+#
+# The split is not about shipping more artefacts, it is about the compiler being
+# able to say no. Before it, every module could reach every other module and
+# three of them reached UP into main.rs, so "the daemon does not depend on the
+# terminal stack" was a claim in a comment rather than something anything
+# checked. Now `taimux-core` cannot see the picker, `taimux-daemon` cannot see
+# the picker either, and the only crate that links ratatui is the one that draws.
+#
+# It still ships as ONE binary. The installer, the tmux plugin, the launcher
+# symlink and another host's ssh lookup all resolve exactly one name, and two
+# artefacts would mean two of each of those for no benefit anyone using it can
+# observe.
+[workspace]
+resolver = "2"
+members = ["core", "daemon", "cli"]
+
+# Shared metadata the members inherit. NOT the version: release-please's rust
+# strategy rewrites `package.version` as a literal and cannot write through a
+# `version.workspace = true` marker, which it reports as "value at path
+# package.version is not tagged". So each crate carries its own literal version
+# and release-please keeps all four in step, which is the job it is here to do.
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pdecat/taimux"
+homepage = "https://github.com/pdecat/taimux"
+rust-version = "1.88"
+
+[workspace.dependencies]
+taimux-core = { path = "core" }
+taimux-daemon = { path = "daemon" }
+taimux-cli = { path = "cli" }
+
+[package]
+name = "taimux"
+version = "0.9.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "List, select and jump between AI coding-agent sessions across your tmux panes, windows, sessions and hosts."
+readme = "README.md"
+keywords = ["tmux", "ai", "agent", "picker", "session"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+taimux-core = { workspace = true }
+taimux-daemon = { workspace = true }
+taimux-cli = { workspace = true }
+
+# opt-level = "s" and lto because this is a picker: it is forked on a keypress and
+# its startup is the latency a human feels, and it is downloaded by every host.
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

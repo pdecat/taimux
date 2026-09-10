@@ -1,0 +1,95 @@
+# The artefact the other machines get.
+#
+# taimux is a binary, and not every host that runs it can build one: some have
+# cargo, some do not. So this produces ONE statically linked x86_64
+# artefact, which is what makes it portable in the way that matters here: the
+# hosts differ in glibc (2.43 on one here, 2.41 on another), and a build on the newer
+# one does not run on the older. A musl-static build has no libc to match.
+#
+# Every push to main leaves a downloadable artefact, so there is always a current
+# one to grab. Attaching one to a RELEASE is release-please.yml's job: it calls
+# this workflow (`workflow_call`) after cutting the tag, so the artefact people
+# install and the artefact built on every push come out of identical steps rather
+# than out of two copies of these instructions.
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_call:
+  workflow_dispatch:
+
+# No concurrency group, on purpose, and it was removed after it bit.
+#
+# This workflow now runs two ways on the same ref: on the push, and CALLED by
+# release-please.yml for the release. Both were landing in one
+# `build-${{ github.ref }}` group with cancel-in-progress, so they cancelled
+# each other. On v0.2.0 the release build happened to win and the push build
+# died, which cost nothing; the race runs the other way just as easily, and then
+# a release is published with NO ASSET attached and the only sign of it is a
+# cancelled run nobody reads.
+#
+# So nothing here is cancellable. The saving it gave up is a superseded musl
+# build on a rapid second push, which is a minute of runner time with the cargo
+# cache warm. ci.yml keeps its own group, because cancelling a superseded test
+# run gates nothing.
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The rust-std for the target is all that is needed: this crate is pure
+      # Rust apart from three flock symbols, which musl provides, and Rust ships
+      # self-contained crt objects for *-linux-musl so no musl-gcc is involved.
+      - name: musl target
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: musl-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: musl-${{ runner.os }}-
+
+      - name: build
+        run: cargo build --release --target x86_64-unknown-linux-musl
+
+      # Prove it is actually static before publishing it, because the whole point
+      # of this job is that it runs on a host with an older libc. A dynamically
+      # linked artefact here would look fine on the runner and fail there.
+      - name: it must be static
+        run: |
+          bin=target/x86_64-unknown-linux-musl/release/taimux
+          file "$bin"
+          if ! file "$bin" | grep -q 'static'; then
+            echo "not statically linked, refusing to publish it" >&2
+            exit 1
+          fi
+          ldd "$bin" 2>&1 | grep -qi 'not a dynamic executable\|statically linked'
+          ls -la "$bin"
+
+      # …and that it runs at all. `list` is the wire format another host answers
+      # with over ssh, and there is no tmux here, so what is asserted is that it
+      # exits 0 with nothing to say rather than failing. `version` is what the
+      # installer on each host compares against the release it just looked up, so
+      # an artefact that cannot answer it cannot be upgraded onto.
+      - name: it must run
+        run: |
+          bin=target/x86_64-unknown-linux-musl/release/taimux
+          "$bin" version
+          "$bin" list
+          "$bin" index
+          "$bin" rows --width 100 --home /home/x < /dev/null
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: taimux-x86_64-static
+          path: target/x86_64-unknown-linux-musl/release/taimux
+          if-no-files-found: error
+          retention-days: 90
