@@ -1,0 +1,22 @@
+# Blank issues stay OFF: the bug form asks for taimux version, tmux version,
+# the agent and the distro, and a report without those needs a round trip
+# before anyone can start. The links below are the escape hatches for the two
+# things that are not bug reports.
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/pdecat/taimux/security/advisories/new
+    about: >
+      Report privately instead. Please do not open a public issue for anything
+      exploitable.
+  - name: AI-assisted contributions
+    url: https://github.com/pdecat/taimux/blob/main/.github/AI_POLICY.md
+    about: >
+      Welcome, with conditions. Read this before opening a pull request an
+      agent helped with.
+  - name: Wanting a full agent runtime instead
+    url: https://github.com/herdrdev/herdr
+    about: >
+      taimux is a picker over the tmux you already run. If you want something
+      that owns the terminal, with persistence and orchestration, herdr does
+      that well.
