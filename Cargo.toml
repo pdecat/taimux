@@ -27,10 +27,13 @@ repository = "https://github.com/pdecat/taimux"
 homepage = "https://github.com/pdecat/taimux"
 rust-version = "1.88"
 
+# Both a path AND a version. The path is what a local build uses; the version is
+# what crates.io requires, because a published crate cannot depend on a
+# directory. They must be bumped together, which is release-please's job.
 [workspace.dependencies]
-taimux-core = { path = "core" }
-taimux-daemon = { path = "daemon" }
-taimux-cli = { path = "cli" }
+taimux-core = { path = "core", version = "0.10.0" }
+taimux-daemon = { path = "daemon", version = "0.10.0" }
+taimux-cli = { path = "cli", version = "0.10.0" }
 
 [package]
 name = "taimux"
@@ -44,6 +47,12 @@ description = "List, select and jump between AI coding-agent sessions across you
 readme = "README.md"
 keywords = ["tmux", "ai", "agent", "picker", "session"]
 categories = ["command-line-utilities"]
+
+# What a published crate does NOT need. The demo recording is 612 kB and the
+# frozen layout fixture 334 kB, and neither is reachable from the binary: they
+# exist for people working ON taimux, who have the repository. Shipping them
+# would more than double the download for every `cargo install`.
+exclude = ["demo/", "tests/", "scripts/", ".github/"]
 
 [dependencies]
 taimux-core = { workspace = true }
