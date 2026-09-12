@@ -49,6 +49,40 @@ tmux-resurrect restore bring those conversations back rather than opening new
 ones. Same pane scan, same reading of what each session is doing. See
 [Putting a Claude Code session back](#putting-a-claude-code-session-back).
 
+## Contents
+
+- [What a session is doing](#what-a-session-is-doing)
+- [Told, rather than guessed](#told-rather-than-guessed)
+- [Narrow windows](#narrow-windows)
+- [Supported agents](#supported-agents)
+- [Agent version](#agent-version)
+- [Requirements](#requirements)
+- [Install](#install)
+  - [From a release, with no toolchain](#from-a-release-with-no-toolchain)
+  - [From source](#from-source)
+  - [As a tmux plugin (tpm / tpack)](#as-a-tmux-plugin-tpm--tpack)
+  - [Oh My Tmux](#oh-my-tmux)
+- [Usage](#usage)
+- [A terminal that changes size](#a-terminal-that-changes-size)
+- [Searching what a session said](#searching-what-a-session-said)
+- [Sessions running outdated code](#sessions-running-outdated-code)
+- [Sessions that ended](#sessions-that-ended)
+- [Sessions on other hosts](#sessions-on-other-hosts)
+- [Putting a Claude Code session back](#putting-a-claude-code-session-back)
+  - [`taimux restart`](#taimux-restart)
+  - [`taimux resurrect`](#taimux-resurrect)
+  - [`taimux print-cmds`](#taimux-print-cmds)
+- [How detection works](#how-detection-works)
+- [Demo](#demo)
+- [Notes](#notes)
+- [The daemon](#the-daemon)
+- [Not a shell script](#not-a-shell-script)
+- [The picker](#the-picker)
+- [Development](#development)
+- [Prior art](#prior-art)
+- [Uninstall](#uninstall)
+- [License](#license)
+
 ## What a session is doing
 
 The column before the summary answers it, in three states:
