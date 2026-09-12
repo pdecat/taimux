@@ -135,3 +135,50 @@ jobs:
             taimux-x86_64-linux-musl
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets \
             -q '.assets[] | "\(.name)  \(.size) bytes"'
+
+  # crates.io, so `cargo install taimux` works.
+  #
+  # Same shape as `attach` above and for the same reason: it asks the registry
+  # what exists rather than trusting how the release-please job happened to end.
+  # It also makes a re-run safe, which matters more here than anywhere else in
+  # this workflow, because a publish cannot be undone. A version already on
+  # crates.io is skipped rather than retried into an error.
+  #
+  # `--workspace` rather than four invocations in dependency order: cargo works
+  # the order out from the graph, verifies the crates against each other locally
+  # instead of against an index that does not have them yet, and waits for the
+  # index between uploads. Doing it by hand means reimplementing all three.
+  publish:
+    needs: [release-please, build]
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: publish, if this commit is a release that is not on crates.io yet
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "no CARGO_REGISTRY_TOKEN secret: skipping the crates.io publish"
+            exit 0
+          fi
+
+          v=$(sed -n '/^\[package\]/,/^\[/p' Cargo.toml |
+              sed -n 's/^version = "\(.*\)"/\1/p' | head -1)
+          test -n "$v"
+
+          if ! gh release view "v$v" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "no release v$v: this run cut nothing, nothing to publish"
+            exit 0
+          fi
+
+          # Already there: a re-run, or a hand-publish that got there first.
+          # Asking is cheap and an unnecessary upload is not recoverable.
+          if curl -sf "https://crates.io/api/v1/crates/taimux/$v" >/dev/null 2>&1; then
+            echo "taimux $v is already on crates.io, nothing to do"
+            exit 0
+          fi
+
+          cargo publish --workspace --no-verify
