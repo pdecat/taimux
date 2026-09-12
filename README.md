@@ -264,10 +264,10 @@ compare against.
 ## Requirements
 
 - `tmux` (≥ 3.2 for `display-popup`; tested on 3.6)
-- **Rust stable, to build from source.** taimux IS the binary (`just build`);
-  there is no script any more. Not needed if you install from a release: those
-  carry one statically linked artefact that runs on any x86_64 Linux, with no
-  glibc version to match, which is how the other machines get it
+- **Rust stable, but only to build from source.** A release needs none: it
+  carries one statically linked artefact that runs on any x86_64 Linux with no
+  glibc version to match, which is what lets one file serve every machine you
+  put it on
 - `curl`, only to install from a release
 - `bash`, for the tmux plugin entry point, the test harness and the demo. Nothing
   taimux does at runtime goes through a shell
@@ -546,7 +546,7 @@ The list **auto-refreshes** so sessions that start or exit show up on their own;
 the cursor stays pinned to the same session across refreshes, and so does the
 state `Tab` last filtered on. Tune it with `TAIMUX_REFRESH` (timer interval in
 seconds, fractional OK, default `3`; `0` disables and leaves just `Ctrl-r`).
-There is no idle gate any more: fzf needed one because a reload blocked its input
+There is no idle gate: fzf needed one because a reload blocked its input
 loop and swallowed arrow keys mid-navigation, and a tick in the picker's own loop
 is just a redraw. A typed query and the cursor both survive one.
 
@@ -647,8 +647,9 @@ lives in `$XDG_RUNTIME_DIR` and dies with the boot.
 feature.** fzf
 reads a pasted line break as Enter, and the only thing stopping the picker
 accepting on a paste is that [a pasted line matches no session](#notes). Searching
-transcripts hands it something to match: measured on this corpus, a line of pasted
-shell config went from matching 0 rows to matching 14, and one of them was plain
+transcripts hands it something to match: measured over a few hundred real
+transcripts, a line of pasted shell config went from matching 0 rows to matching
+14, and one of them was plain
 prose, so no "does it look like a paste" heuristic can save it. Left always on,
 the picker accepts on the paste's first line, closes, and the rest is typed into
 the agent in the pane behind. That is the bug the guard was written for, and it
@@ -704,7 +705,6 @@ publishes that. Rows for other agents still match on what they show.
 | `TAIMUX_SEARCH_TTL` | `5` | seconds between background index refreshes |
 | `TAIMUX_SEARCH_REMOTE` | `1` | `0` leaves other hosts' rows matching on what they show |
 | `TAIMUX_SEARCH_REMOTE_TTL` | `60` | seconds between index fetches per host |
-| `TAIMUX_SCAN_TTL` | `3` | how stale a pane scan a keystroke may reuse |
 
 
 
@@ -803,9 +803,10 @@ only the ones that have said something since are read again.
 | `TAIMUX_SESSIONS_MAX` | `200` | how many conversations are tracked, newest first |
 | `TAIMUX_DEAD_TURNS` | `6` | turns of the conversation the preview shows |
 
-That cap is not tidiness. Claude Code's own transcript cleanup is set to ten years
-here, so the corpus only grows, and both this list and the content index behind it
-have to be bounded by something. Recency is the only sensible bound.
+That cap is not tidiness. Claude Code's transcript retention is a setting, and
+anyone who raises it (`cleanupPeriodDays`) has a directory that only grows, so
+both this list and the content index behind it have to be bounded by something
+that is not "however much is on disk". Recency is the only sensible bound.
 
 ## Sessions on other hosts
 
@@ -879,7 +880,7 @@ is complete; after that a reply is served as it stands and refreshed behind the
 picker, landing on the next tick. That matters because the refresh is on the
 picker's critical path: a host over the network may cost the list its freshness,
 never its responsiveness. Steady-state
-cost of the whole feature, measured against four hosts: ~20 ms a refresh.
+cost of the whole feature: ~5 ms per host per refresh.
 
 A host that **stops** answering keeps its place as one row saying so, since a
 host silently vanishing looks exactly like a host with no sessions on it. Only
@@ -1084,24 +1085,20 @@ should imitate neither.
   [conversations](#sessions-that-ended) and the pane scan behind a keystroke are
   cached there too, for the same reason: none of it is worth keeping across a
   reboot, and all of it is cheap to rebuild.
-- **A paste that lands while the picker is open used to be a real hazard.** fzf read a
-  pasted line break as the Enter key, so pasting several lines into the picker
-  used to accept on the first one, and every chunk still in flight then arrived
-  after the picker was gone: tmux handed those to whatever pane was current by
-  then, typed them into the agent living there, and the paste's own trailing
-  newline submitted them. Two sessions here were caught days apart holding the
-  tail of a pasted config file as a prompt nobody wrote. Enter is now
-  `accept-non-empty` (a pasted line matches no session, so the picker stays open
-  and swallows the whole paste), and on the way out the terminal is drained for
-  `TAIMUX_PASTE_GRACE` seconds (default `0.3`, only when something was actually
-  typed at the picker) in case a line did match and the jump was real. The
-  remaining gap is a pasted first line that both matches a session and is
-  followed by a pause longer than that grace; raise the knob if a slow link makes
-  that real. **None of that is here any more.** The picker asks the terminal for
-  bracketed paste and gets an event carrying its own text, which cannot be
-  mistaken for Enter, so the accept guard, the grace and the drain were all
-  deleted with fzf. The paragraph above is kept because it is why the picker
-  reads paste the way it does. See [the picker](#the-picker).
+- **A paste that lands while the picker is open cannot escape it.** The picker
+  asks the terminal for bracketed paste, so a paste arrives as one event
+  carrying its own text and can never be mistaken for Enter.
+  That is worth stating because the obvious implementation gets it wrong, and
+  this one did. Reading keys one at a time, a pasted line break *is* Enter: the
+  picker accepts on the first line, and every chunk still in flight arrives
+  after it has gone, so the terminal hands them to whatever pane is current by
+  then, types them into the agent living there, and the paste's own trailing
+  newline submits them. That is not hypothetical: two sessions were caught days
+  apart holding the tail of a pasted config file as a prompt nobody wrote.
+  Guarding it after the fact takes an accept-on-non-empty rule, a drain of the
+  terminal on the way out and a grace period to size, and still leaves a gap.
+  Asking for bracketed paste removes the class instead, which is why the picker
+  is drawn rather than delegated. See [the picker](#the-picker).
 
 ## The daemon
 
