@@ -79,6 +79,7 @@ ones. Same pane scan, same reading of what each session is doing. See
 - [Not a shell script](#not-a-shell-script)
 - [The picker](#the-picker)
 - [Development](#development)
+- [History](#history)
 - [Prior art](#prior-art)
 - [Uninstall](#uninstall)
 - [License](#license)
@@ -1271,6 +1272,30 @@ Commits](https://www.conventionalcommits.org/), and not only as a convention:
 release-please reads them to decide the next version, so `feat:`, `fix:`,
 `perf:` and `refactor:` cut a release and `docs:`, `test:`, `ci:` and `chore:`
 ride along in the next one.
+
+## History
+
+taimux began in June 2026 as a bash prototype: 3479 lines of shell that scanned
+tmux panes, read their screens and drove an `fzf` picker. It worked, and it was
+too slow in the one place that mattered. The turn-boundary hook alone ran five
+times per turn per session, and `bash` plus `awk` plus their subshells cost more
+than the work they did. `taimux list` took 434 ms where the binary takes 1.9 ms,
+most of it spent parsing the 4400-line script before doing anything at all.
+
+Over a day in September 2026 it was ported to Rust, one subsystem at a time,
+each compared against the shell on live data before the shell version was
+deleted. Where deleting would have destroyed the only definition of a behaviour,
+the shell's own output was frozen first: `tests/golden/rows.expected` is 504
+cases of it, it is compared byte for byte, and it cannot be regenerated. That is
+why [Not a shell script](#not-a-shell-script) reads as it does, and why so many
+comments in the source name "the bash version" as the specification. The
+prototype is gone; what it defined is not.
+
+The name took longer to settle than the rewrite. It was **jumpmux** until it
+collided with an unrelated project doing much the same job, and after one
+short-lived detour it became **taimux**: the AI sessions in your tmux. The
+current repository starts at the rename, which is why its history is shorter
+than the project is.
 
 ## Prior art
 

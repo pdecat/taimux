@@ -1,8 +1,7 @@
 //! Putting taimux on PATH and binding the key.
 //!
-//! Step 6 of replacing bash, and the last of it. This is the part that writes to
-//! a real configuration file, so the rules it follows are about not making a mess
-//! of somebody's tmux config:
+//! This is the part that writes to a real configuration file, so the rules it
+//! follows are about not making a mess of somebody's tmux config:
 //!
 //! - **Idempotent by the command string.** A past install's block is stripped
 //!   from every file it could have touched before a new one is written, or a

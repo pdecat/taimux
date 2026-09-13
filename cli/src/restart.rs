@@ -1,7 +1,7 @@
 //! Putting a claude session back on the version that is installed now.
 //!
-//! Step 4 of replacing bash, and the part where a mistake costs a turn of work
-//! rather than a redraw. Everything here is built around one rule: **a pane it
+//! The part where a mistake costs a turn of work rather than a redraw.
+//! Everything here is built around one rule: **a pane it
 //! cannot be sure about is skipped, with a reason.** Guessing which conversation
 //! a pane is on and then interrupting it is worse than doing nothing.
 //!

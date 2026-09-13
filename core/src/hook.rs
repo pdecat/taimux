@@ -1,6 +1,6 @@
 //! What a session reports about itself.
 //!
-//! A port of taimux's `cmd_hook`, `_hook_agent_pid` and `_json_str`. This is the
+//! A port of the bash prototype's `cmd_hook`, `_hook_agent_pid` and `_json_str`. This is the
 //! single most repeated fork on the machine: Claude Code runs it at five turn
 //! boundaries per turn, per session, and there are about 28 sessions. Replacing
 //! `bash` plus `awk` plus its subshells with one static binary is the whole point.

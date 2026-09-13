@@ -1,8 +1,7 @@
 //! Which conversation a claude pane is on.
 //!
-//! Step 1 of replacing bash, and it comes first because the indexer needs it:
-//! nothing can be indexed until it is known which transcript each live pane is
-//! talking to.
+//! Comes first because the indexer needs it: nothing can be indexed until it is
+//! known which transcript each live pane is talking to.
 //!
 //! Two rungs here, in this order, and the order is the whole design:
 //!

@@ -1,6 +1,6 @@
 //! What a session is doing, read off its screen.
 //!
-//! A port of taimux's `_screen_awaits_input`, `_screen_is_working`,
+//! A port of the bash prototype's `_screen_awaits_input`, `_screen_is_working`,
 //! `_pane_state` and `_merge_state`. These take the captured text as an argument
 //! rather than capturing it themselves, which is what makes them testable at all:
 //! the bash originals are the same shape for the same reason.

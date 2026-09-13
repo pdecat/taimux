@@ -1,10 +1,8 @@
-//! taimux: taimux.
+//! The dispatcher: every subcommand taimux answers to.
 //!
-//! Not a daemon with a client any more, whatever the name says. This binary IS
-//! the tool: the picker, the pane scan, the screen reading, the transcript index,
-//! federation, restart, resurrect and the installer. It started as a collection
-//! daemon beside 3479 lines of bash, took one subsystem at a time, and the bash
-//! is gone. Nothing at runtime goes through a shell.
+//! One binary holds the lot: the picker, the pane scan, the screen reading, the
+//! transcript index, federation, restart, resurrect and the installer. Nothing
+//! at runtime goes through a shell.
 //!
 //! `serve` is still here and still worth having, because the expensive thing is
 //! reading 26 pane screens and a running daemon has them cached. But it is an

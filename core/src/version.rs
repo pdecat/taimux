@@ -2,7 +2,7 @@
 //!
 //! Read from the live process rather than from whatever is on `$PATH`, so a
 //! long-lived session that a self-update has left a release or two behind stands
-//! out. A port of taimux's `_agent_version` and its three sources, cheapest
+//! out. A port of the bash prototype's `_agent_version` and its three sources, cheapest
 //! first.
 //!
 //! The daemon changes one thing about this and it is the point of having one: the

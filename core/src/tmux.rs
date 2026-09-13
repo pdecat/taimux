@@ -1,10 +1,10 @@
 //! Driving tmux: switching the client, and rendering a pane for the preview.
 //!
-//! Step 2 of replacing bash. Small, and mostly a matter of getting the command
-//! lines exactly right, which is why every one of them is built from a slice
+//! Small, and mostly a matter of getting the command lines exactly right, which
+//! is why every one of them is built from a slice
 //! rather than a formatted string: a pane id, a directory or a transcript path
-//! goes in as one argument and can never be re-split by a shell that is not there
-//! any more.
+//! goes in as one argument and can never be re-split by a shell, because there is
+//! no shell in the path at all.
 //!
 //! That is the one real gain here beyond the fork. `_switch_dead` had to
 //! `printf '%q'` its transcript path because the whole command was handed to a

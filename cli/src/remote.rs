@@ -1,7 +1,7 @@
 //! Other hosts' sessions, in the same list.
 //!
-//! Step 5 of replacing bash. A pane holding `ssh <host> -t tmux …` is a window
-//! onto a whole other tmux server, and the agents running in it are invisible to
+//! A pane holding `ssh <host> -t tmux …` is a window onto a whole other tmux
+//! server, and the agents running in it are invisible to
 //! everything else here: they are not this server's panes and not this box's
 //! processes. But that host has a taimux of its own, and `list` is a complete
 //! answer about it.

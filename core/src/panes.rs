@@ -1,9 +1,9 @@
 //! Which tmux panes are running a coding agent.
 //!
-//! A port of taimux's `agent_of()` and the join in `_agent_rows`, kept
-//! deliberately faithful: the bash version is the specification, its tests are
-//! the ones that found these rules, and the two have to agree row for row while
-//! both exist.
+//! A port of the bash prototype's `agent_of()` and the join in `_agent_rows`, kept
+//! deliberately faithful: the prototype was the specification, its tests are the
+//! ones that found these rules, and this had to agree with it row for row before
+//! it could replace it.
 
 use crate::proc::Foreground;
 use std::collections::HashMap;

@@ -1,9 +1,9 @@
 //! A conversation, boiled down to the prose you might search for.
 //!
-//! A port of taimux's `_index_extract` and the `_TRANSCRIPT_AWK` helpers it
-//! shares with the preview. Faithful on purpose: the bash version is the
-//! specification, its exclusions each cost something to learn, and the two have
-//! to agree byte for byte while both exist.
+//! A port of the bash prototype's `_index_extract` and the `_TRANSCRIPT_AWK` helpers it
+//! shares with the preview. Faithful on purpose: the prototype was the
+//! specification, its exclusions each cost something to learn, and this had to
+//! agree byte for byte before it could replace it.
 //!
 //! Two things are kept and everything else is dropped: a user turn whose content
 //! is a plain string (what you typed), and every `{"type":"text","text":…}` block
@@ -141,8 +141,8 @@ fn clean(s: &str) -> String {
     // ASCII spaces only, matching awk's `sub(/^ +/)`. Rust's `trim` is
     // Unicode-aware and would also strip U+00A0, which diverged from the bash
     // version on four real transcripts that open with a non-breaking space.
-    // Arguably the better behaviour, but bash is the specification while both
-    // exist, and a search index that disagrees with itself is a bug.
+    // Arguably the better behaviour, but the prototype was the specification and
+    // a search index that disagrees with itself is a bug.
     collapsed.trim_matches(' ').to_string()
 }
 
