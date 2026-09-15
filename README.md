@@ -176,7 +176,13 @@ delete it on its way out.
 A dialog **on screen** still outranks the line, because that is the state which
 must never be wrong and the one the hook cannot close: a permission *granted*
 fires no event of its own, so a line would otherwise sit at `input` for the rest
-of the turn. Everything else the line says is taken as it stands.
+of the turn. Two more readings overrule it, the same argument in both directions:
+an idle prompt box under a line reading `input`, and an activity line with a live
+counter under one reading `idle`. Either way the screen says positively what the
+line has stopped saying, and a line that stopped being written is what a missed
+event leaves behind. Everything else the line says is taken as it stands, which is
+why it is written at all: `run` and `input` tell the list what a screen often
+cannot show.
 
 The permission mode has nowhere else to come from, and it is shown by how brightly
 the agent name is painted, so it costs the summary no width:

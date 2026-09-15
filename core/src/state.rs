@@ -118,12 +118,26 @@ pub fn classify(screen: &str) -> State {
 /// box, with no dialog over it, is proof a hook `input` has gone stale. Two were
 /// found stuck that way on a live server, one 38 hours old, each making its pane
 /// read as working forever and refuse every restart.
+///
+/// A hook `idle` goes stale the same way, and costs the same in the other
+/// direction: an activity line with a live counter under it is the screen saying
+/// "mid-turn" as positively as the prompt box says "idle", so a line still
+/// reading `idle` is one that stopped being written, its turn's opening `run`
+/// having never landed. Found on a pane working away at a two-minute turn whose
+/// line was two days old: the list called it idle, and `restart` counted it
+/// restartable. Only `idle` is overruled here: a `run` line, and an `input` line
+/// the screen does not contradict, are the hook telling the list what the screen
+/// cannot show, which is the whole reason it is written. A session streaming a
+/// long answer shows no activity line at all while it does so.
 pub fn merge(screen: State, hook: Option<&str>) -> State {
     if screen == State::Input {
         return State::Input;
     }
     if screen == State::Idle && hook == Some("input") {
         return State::Idle;
+    }
+    if screen == State::Run && hook == Some("idle") {
+        return State::Run;
     }
     match hook {
         Some("run") => return State::Run,
@@ -213,6 +227,17 @@ mod tests {
     fn an_idle_screen_overrules_a_stale_hook_input() {
         // the 38-hour-old line that made a pane refuse every restart
         assert_eq!(merge(State::Idle, Some("input")), State::Idle);
+    }
+
+    #[test]
+    fn a_working_screen_overrules_a_stale_hook_idle() {
+        // The line a session's last turn closed with, left behind because the
+        // opening `run` of the turn now on screen never arrived. Two days old on
+        // the pane this was found on, which was mid-turn at the time.
+        assert_eq!(merge(State::Run, Some("idle")), State::Run);
+        // …and only that screen overrules it: every other reading still takes
+        // the line at its word (the rest of them in the test below).
+        assert_eq!(merge(State::Idle, Some("idle")), State::Idle);
     }
 
     #[test]
