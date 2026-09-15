@@ -29,11 +29,19 @@ rust-version = "1.88"
 
 # Both a path AND a version. The path is what a local build uses; the version is
 # what crates.io requires, because a published crate cannot depend on a
-# directory. They must be bumped together, which is release-please's job.
+# directory.
+#
+# The `x-release-please-version` annotations are load-bearing. release-please's
+# rust strategy bumps every [package] version and the lockfile, and does NOT
+# touch [workspace.dependencies], so without them a release PR leaves these
+# three pinned to the PREVIOUS version and the workspace stops resolving:
+# taimux-daemon 0.11.0 requiring taimux-core ^0.10.0 when core is 0.11.0. The
+# generic updater rewrites the version on any line carrying the annotation, and
+# `extra-files` in release-please-config.json is what points it at this file.
 [workspace.dependencies]
-taimux-core = { path = "core", version = "0.10.0" }
-taimux-daemon = { path = "daemon", version = "0.10.0" }
-taimux-cli = { path = "cli", version = "0.10.0" }
+taimux-core = { path = "core", version = "0.10.0" } # x-release-please-version
+taimux-daemon = { path = "daemon", version = "0.10.0" } # x-release-please-version
+taimux-cli = { path = "cli", version = "0.10.0" } # x-release-please-version
 
 [package]
 name = "taimux"
