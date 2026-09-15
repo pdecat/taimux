@@ -362,6 +362,22 @@ mod tests {
     }
 
     #[test]
+    fn the_spelling_reported_is_the_one_in_the_file() {
+        // the launcher symlink, which is what a settings file written before the
+        // binary moved will be holding
+        let js = br#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/home/p/.local/bin/taimux hook"}]}]}}"#;
+        assert_eq!(
+            registered_cmd(js, "/build/target/release/taimux hook"),
+            "/home/p/.local/bin/taimux hook"
+        );
+        // nothing of ours in there: what we asked for is what landed
+        assert_eq!(
+            registered_cmd(br#"{"hooks":{}}"#, "/build/taimux hook"),
+            "/build/taimux hook"
+        );
+    }
+
+    #[test]
     fn the_keys_read_as_a_sentence() {
         assert_eq!(describe("a", "F1"), "prefix + a and F1");
         assert_eq!(describe("a", ""), "prefix + a");
@@ -467,7 +483,7 @@ mod tests {
     }
 }
 
-/// Register the hook for the five turn boundaries.
+/// Register the hook for the turn boundaries, and for a tool having run.
 ///
 /// **Through `jq`, deliberately**, and this is the one place a fork is the right
 /// answer rather than a leftover. `settings.json` is a file the AGENT rewrites
@@ -479,9 +495,18 @@ mod tests {
 /// The command string is what makes the entry idempotent, so it has to be spelled
 /// the same way every time: a config managed from somewhere else (chezmoi) that
 /// spells it differently would otherwise end up with the hook registered twice,
-/// firing twice per event.
+/// firing twice per event. Which is why a spelling already IN the file wins over
+/// this binary's own path. `current_exe()` resolves symlinks, so a file holding
+/// `~/.local/bin/taimux hook`, written when the launcher was installed there,
+/// would otherwise gain a second entry under the build path the symlink points
+/// at the first time anyone adds an event. Found by adding two.
 pub fn install_hooks(exe: &str) -> i32 {
-    const EVENTS: &str = "SessionStart UserPromptSubmit Stop PermissionRequest SessionEnd";
+    // The two tool events carry no `matcher`, which is what the entry below
+    // writes, and a matcher-less entry fires for every tool: checked against a
+    // live session rather than assumed, since a matcher that matched nothing
+    // would register cleanly and then simply never fire.
+    const EVENTS: &str =
+        "SessionStart UserPromptSubmit Stop PermissionRequest SessionEnd PostToolUse PostToolUseFailure";
     let home = std::env::var("HOME").unwrap_or_default();
     let dir = std::env::var("CLAUDE_CONFIG_DIR").unwrap_or_else(|_| format!("{}/.claude", home));
     let settings = PathBuf::from(&dir).join("settings.json");
@@ -497,13 +522,16 @@ pub fn install_hooks(exe: &str) -> i32 {
         let _ = std::fs::write(&settings, "{}\n");
     }
     let prog = r#"
-        def ensure($event):
+        def ensure($event; $c):
           .hooks //= {}
           | .hooks[$event] //= []
-          | if [.hooks[$event][]?.hooks[]?.command] | index($cmd) then .
-            else .hooks[$event] += [{hooks: [{type: "command", command: $cmd}]}]
+          | if [.hooks[$event][]?.hooks[]?.command] | index($c) then .
+            else .hooks[$event] += [{hooks: [{type: "command", command: $c}]}]
             end;
-        reduce ($events | split(" ")[]) as $e (.; ensure($e))
+        ( [.hooks[]?[]?.hooks[]?.command // empty]
+          | map(select(test("(^|/)taimux hook$")))
+          | first ) as $found
+        | reduce ($events | split(" ")[]) as $e (.; ensure($e; $found // $cmd))
     "#;
     let out = std::process::Command::new("jq")
         .args([
@@ -532,12 +560,29 @@ pub fn install_hooks(exe: &str) -> i32 {
     }
     println!(
         "registered `{}` for {} in {}",
-        cmd,
+        registered_cmd(&out.stdout, &cmd),
         EVENTS,
         settings.display()
     );
     println!("Sessions already running keep reporting nothing until they restart.");
     0
+}
+
+/// The command string that actually landed, read back out of what jq produced.
+///
+/// A spelling already in the file wins over this binary's path, so what was asked
+/// for and what is now registered are not always the same string, and the line
+/// printed afterwards should be the one somebody could go and look for.
+fn registered_cmd(settings_json: &[u8], fallback: &str) -> String {
+    let text = String::from_utf8_lossy(settings_json);
+    let Some(end) = text.find("taimux hook\"") else {
+        return fallback.to_string();
+    };
+    let head = &text[..end + "taimux hook".len()];
+    match head.rfind('"') {
+        Some(q) => head[q + 1..].to_string(),
+        None => fallback.to_string(),
+    }
 }
 
 /// Is a program on PATH? Our own, so the check costs no fork.

@@ -1245,7 +1245,7 @@ fn help() -> String {
          \n\
          install         symlink the launcher and bind prefix+a and F1\n\
          bind            bind a running tmux server, by absolute path\n\
-         install-hooks   register the turn-boundary hook with Claude Code\n\
+         install-hooks   register the self-reporting hook with Claude Code\n\
          version         print the version\n",
         env!("CARGO_PKG_VERSION"),
         taimux_core::paths::socket_path().display()

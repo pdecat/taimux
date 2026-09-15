@@ -155,10 +155,13 @@ So a session can report itself instead, through its own hooks:
 taimux install-hooks      # registers `taimux hook` in ~/.claude/settings.json
 ```
 
-That registers one command for five events, all of them turn boundaries, so it
-costs a couple of forks per turn rather than one per tool call: `SessionStart`,
-`UserPromptSubmit` (a turn started), `Stop` (it ended), `PermissionRequest` (about
-to ask you) and `SessionEnd`. Each writes one line under
+That registers one command for seven events. Five are turn boundaries:
+`SessionStart`, `UserPromptSubmit` (a turn started), `Stop` (it ended),
+`PermissionRequest` (about to ask you) and `SessionEnd`. Two more, `PostToolUse`
+and `PostToolUseFailure`, say a tool just ran and so the turn is still going.
+Those two fire per tool call rather than per turn, which the bash version could
+not have afforded and this one can: 685 µs an invocation, so a thirty-call turn
+spends 20 ms of CPU over the minutes it takes. Each writes one line under
 `$XDG_RUNTIME_DIR/taimux/`, keyed by the pane:
 
 ```
@@ -173,10 +176,16 @@ inherited `$TMUX_PANE` from the session that launched it, does not match the
 pane's live agent and is ignored. A nested session cannot write over the line, nor
 delete it on its way out.
 
+A tool call is also the only **repair** the line has. A turn whose opening
+`UserPromptSubmit` never reached the hook leaves the line reading whatever the
+previous turn closed with, and nothing else in the turn would touch it. Its first
+tool call puts it back to `run`. Found in the wild on a pane prompted twice one
+morning and two minutes into a turn, whose line had not moved in two days.
+
 A dialog **on screen** still outranks the line, because that is the state which
-must never be wrong and the one the hook cannot close: a permission *granted*
-fires no event of its own, so a line would otherwise sit at `input` for the rest
-of the turn. Two more readings overrule it, the same argument in both directions:
+must never be wrong: granting a permission fires no event of its own, so the line
+reads `input` until the tool actually runs and `PostToolUse` lands. Two more
+readings overrule it, the same argument in both directions:
 an idle prompt box under a line reading `input`, and an activity line with a live
 counter under one reading `idle`. Either way the screen says positively what the
 line has stopped saying, and a line that stopped being written is what a missed
@@ -465,13 +474,19 @@ answered on your behalf. Where forcing would not help at all (an unresolved
 conversation, a transcript already claimed by another pane) it is not offered. The
 offer takes `Y` as its default too, on the same terms as `F8` below.
 
-That escalation exists because of a failure mode with no other way out. A granted
-permission fires no closing event, so a pane's hook line can sit at `input`
-indefinitely, and a hook `input` folds into `run`: the pane then reads as working
-forever and a plain `Ctrl-x` declines it forever. Found in the wild on a line **38
-hours stale**, against a session that was plainly idle (0.8% CPU, 35 minutes of
-CPU across nearly three days), in a pane too small to render its prompt box and so
-beyond rescue by reading the screen.
+That escalation exists because of a failure mode with no other way out. A line
+that stops being rewritten at `run` or `input` folds into "working" either way:
+the pane then reads as working forever and a plain `Ctrl-x` declines it forever.
+Found in the wild on a line **38 hours stale**, against a session that was plainly
+idle (0.8% CPU, 35 minutes of CPU across nearly three days), in a pane too small to
+render its prompt box and so beyond rescue by reading the screen.
+
+That one was a granted permission, which `PostToolUse` closes now. What has no
+closing event at all is an **interrupted** turn: `Esc` fires nothing, checked with
+all thirteen of Claude Code's hook events subscribed at once, so the line stays at
+`run` until some later turn in that pane completes. The screen cannot settle it
+either, since a session streaming a long answer shows the same prompt box an
+abandoned turn does.
 
 **`F8` asks first**, because a sweep touches panes you
 are not looking at and is not a decision you can take back one row at a time: it
@@ -1155,12 +1170,14 @@ Measured on 31 live panes, byte-identical output in all eight fields:
 | the same list, daemon (warm) | **65 ms** |
 | a full picker row build | 493 ms → **134 ms** |
 
-It also carries the **turn-boundary hook**, which is the most frequently executed
-command in the whole system: five events per turn, per session, across ~28
-sessions. `taimux install-hooks` registers it, and refuses when the binary is
-not built rather than registering a command that cannot run. Measured at **20.5 ms an event
-against 1.9 ms**, because every bash run parses the 4400-line script before doing
-anything. It deliberately does *not* use the socket: the work is local and
+It also carries the **session hook**, which is the most frequently executed command
+in the whole system: five turn boundaries plus one per tool call, per session,
+across ~28 sessions. `taimux install-hooks` registers it, and refuses when the
+binary is not built rather than registering a command that cannot run. Measured at
+**20.5 ms an event against 1.9 ms**, because every bash run parses the 4400-line
+script before doing anything. That ratio is why the two per-tool-call events are
+affordable at all: at 685 µs an invocation they cost a thirty-call turn 20 ms of
+CPU, where bash would have spent 615 ms of it. It deliberately does *not* use the socket: the work is local and
 stateless, so a round trip would add latency and a second failure mode and buy
 nothing, and the hook must keep working when no daemon is running.
 

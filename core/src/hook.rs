@@ -1,9 +1,12 @@
 //! What a session reports about itself.
 //!
 //! A port of the bash prototype's `cmd_hook`, `_hook_agent_pid` and `_json_str`. This is the
-//! single most repeated fork on the machine: Claude Code runs it at five turn
-//! boundaries per turn, per session, and there are about 28 sessions. Replacing
-//! `bash` plus `awk` plus its subshells with one static binary is the whole point.
+//! single most repeated fork on the machine: Claude Code runs it at the turn
+//! boundaries AND after every tool call, per session, and there are about 28
+//! sessions. Replacing `bash` plus `awk` plus its subshells with one static
+//! binary is the whole point, and it is what makes the per-tool-call events
+//! affordable: 685 µs an invocation, so a thirty-call turn spends 20 ms of CPU
+//! over the minutes it runs for.
 //!
 //! **It deliberately does not talk to the daemon.** The design note assumed it
 //! would, but the work here is local and stateless: parse a small payload, walk a
@@ -102,9 +105,18 @@ pub fn decide(
             Some((ppid, _, _)) if ppid == pid => Action::Remove,
             _ => Action::Nothing,
         },
-        "UserPromptSubmit" | "Stop" | "SessionStart" | "PermissionRequest" => {
+        // A tool that has just run is a turn in flight, and it is the ONLY event
+        // that lands after a permission was granted: granting fires nothing of
+        // its own, so without this the line sits at `input` until the turn ends,
+        // or forever if that turn is then interrupted. It doubles as the repair
+        // for a turn whose opening `UserPromptSubmit` never arrived, which is a
+        // thing that happens and has not been explained. `PreToolUse` cannot do
+        // either job: it fires BEFORE `PermissionRequest`, so the state it wrote
+        // would be overwritten by the one it is meant to clear.
+        "UserPromptSubmit" | "Stop" | "SessionStart" | "PermissionRequest" | "PostToolUse"
+        | "PostToolUseFailure" => {
             let state = match event {
-                "UserPromptSubmit" => "run",
+                "UserPromptSubmit" | "PostToolUse" | "PostToolUseFailure" => "run",
                 "PermissionRequest" => "input",
                 _ => "idle", // Stop and SessionStart both land at the prompt
             };
@@ -323,9 +335,35 @@ mod tests {
     }
 
     #[test]
-    fn an_event_nobody_subscribed_to_changes_nothing() {
+    fn a_tool_that_ran_says_the_turn_is_still_going() {
         assert_eq!(
             decide("PostToolUse", Some("auto"), 42, None),
+            Action::Write("42\trun\tauto\n".into())
+        );
+        // The same, whichever way the tool ended.
+        assert_eq!(
+            decide("PostToolUseFailure", Some("auto"), 42, None),
+            Action::Write("42\trun\tauto\n".into())
+        );
+        // Which is what closes a permission the user granted: nothing else fires
+        // after the dialog goes away, and the line would otherwise stay `input`.
+        assert_eq!(
+            decide("PostToolUse", None, 42, Some((42, "input", "default"))),
+            Action::Write("42\trun\tdefault\n".into())
+        );
+    }
+
+    #[test]
+    fn an_event_nobody_subscribed_to_changes_nothing() {
+        // `SubagentStop` deliberately: it fires while the main turn carries on,
+        // so writing `idle` from it would be wrong, and `run` would only repeat
+        // what the tool events already said.
+        assert_eq!(
+            decide("SubagentStop", Some("auto"), 42, None),
+            Action::Nothing
+        );
+        assert_eq!(
+            decide("PreToolUse", Some("auto"), 42, None),
             Action::Nothing
         );
     }
