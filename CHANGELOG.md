@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.11.0](https://github.com/pdecat/taimux/compare/v0.10.0...v0.11.0) (2026-09-15)
+
+
+### Features
+
+* report a turn from its tool calls, not just its boundaries ([ee72a99](https://github.com/pdecat/taimux/commit/ee72a9912e1b589625a0b3f1a01ec6e50d14133f))
+
+
+### Bug fixes
+
+* a working screen overrules a stale hook `idle` ([c0804e2](https://github.com/pdecat/taimux/commit/c0804e2bdd1481fa6dd42683160eeafb43c62ef5))
+* **ci:** keep the workspace dependency versions in step with a release ([cbc5841](https://github.com/pdecat/taimux/commit/cbc5841fe7db2ba174c82709c0b463338f995277))
+
 ## [0.10.0](https://github.com/pdecat/taimux/compare/v0.9.0...v0.10.0) (2026-09-11)
 
 
