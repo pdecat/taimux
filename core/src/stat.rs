@@ -83,10 +83,28 @@ pub fn ssh<T>(f: impl FnOnce() -> T) -> T {
 mod tests {
     use super::*;
 
+    /// These counters are process-global, and the test harness is threaded.
+    ///
+    /// The module comment above explains why global is right in production: the
+    /// picker runs one refresh at a time, so `reset` then `report` brackets
+    /// exactly one. Nothing brackets anything when three tests do it at once on
+    /// three threads. `every_kind_is_counted_and_timed` calls `ssh`, which is
+    /// the very thing `the_report_omits_what_never_ran` asserts is absent, so
+    /// the two fail each other roughly one run in fifty: often enough to redden
+    /// CI, rarely enough to look like a flake and be re-run rather than read.
+    static COUNTERS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Take the lock, surviving a panic in a test that held it: a poisoned
+    /// mutex would turn one real failure into three.
+    fn serialised() -> std::sync::MutexGuard<'static, ()> {
+        COUNTERS.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// The report names only what actually happened, so a slow refresh line is
     /// about the thing that was slow rather than a row of zeroes to read past.
     #[test]
     fn the_report_omits_what_never_ran() {
+        let _g = serialised();
         reset();
         assert_eq!(report(), "");
         capture(|| ());
@@ -98,6 +116,7 @@ mod tests {
 
     #[test]
     fn every_kind_is_counted_and_timed() {
+        let _g = serialised();
         reset();
         probe(|| ());
         ssh(|| ());
@@ -110,6 +129,7 @@ mod tests {
     /// inherits the last one's seconds and every report after a slow one lies.
     #[test]
     fn a_reset_clears_the_clock_too() {
+        let _g = serialised();
         reset();
         capture(|| std::thread::sleep(std::time::Duration::from_millis(5)));
         reset();

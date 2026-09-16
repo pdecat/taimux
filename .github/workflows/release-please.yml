@@ -198,7 +198,14 @@ jobs:
 
           # Already there: a re-run, or a hand-publish that got in first. Asking
           # costs one request and an unnecessary upload is not recoverable.
-          if curl -sf "https://crates.io/api/v1/crates/taimux/$v" >/dev/null 2>&1; then
+          #
+          # The User-Agent is REQUIRED, not politeness: crates.io answers 403 to
+          # curl's default one, `-f` turns that into a failure, and this guard
+          # then reads "not published" for a version that is. It did exactly
+          # that once, and the only visible symptom was the auth step running on
+          # a push that had nothing to publish.
+          if curl -sf -H "User-Agent: taimux-release (github.com/$GITHUB_REPOSITORY)" \
+               "https://crates.io/api/v1/crates/taimux/$v" >/dev/null 2>&1; then
             echo "taimux $v is already on crates.io, nothing to do"
             echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
