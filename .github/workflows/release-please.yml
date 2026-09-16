@@ -148,37 +148,72 @@ jobs:
   # the order out from the graph, verifies the crates against each other locally
   # instead of against an index that does not have them yet, and waits for the
   # index between uploads. Doing it by hand means reimplementing all three.
+  # crates.io, so `cargo install taimux` works.
+  #
+  # **No stored token.** This authenticates by trusted publishing: the job asks
+  # GitHub for an OIDC JWT, crates.io exchanges it for a temporary token, and
+  # the action's post step revokes that token when the job ends. So there is no
+  # long-lived credential in this repository's secrets to leak or rotate, and
+  # the trust is pinned on crates.io's side to this owner, this repository and
+  # THIS workflow file, which is narrower than any token could be.
+  #
+  # `rust-lang/crates-io-auth-action` is the second third-party action here, and
+  # the exception is deliberate like release-please's: it is rust-lang's own, and
+  # its entire purpose is to avoid handing a workflow the very thing the
+  # first-party-only rule exists to protect.
+  #
+  # Configuration is PER CRATE on crates.io, and there is no pending-publisher
+  # flow, so a NEW crate has to be published by hand once before it can be
+  # configured. All four exist. If this job fails at the auth step, that is what
+  # it means: one of them has no Trusted Publishing entry pointing at
+  # release-please.yml.
   publish:
     needs: [release-please, build]
     if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      # What mints the OIDC token. Without it the auth step cannot even ask.
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v7
 
-      - name: publish, if this commit is a release that is not on crates.io yet
+      # Decided BEFORE authenticating, so a run with nothing to publish never
+      # asks crates.io for a token at all. Same rule as the attach job: ask the
+      # API what exists rather than trust how release-please happened to end.
+      - name: is there a release to publish, and is it already up?
+        id: gate
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
-            echo "no CARGO_REGISTRY_TOKEN secret: skipping the crates.io publish"
-            exit 0
-          fi
-
           v=$(sed -n '/^\[package\]/,/^\[/p' Cargo.toml |
               sed -n 's/^version = "\(.*\)"/\1/p' | head -1)
           test -n "$v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
 
           if ! gh release view "v$v" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "no release v$v: this run cut nothing, nothing to publish"
-            exit 0
+            echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
 
-          # Already there: a re-run, or a hand-publish that got there first.
-          # Asking is cheap and an unnecessary upload is not recoverable.
+          # Already there: a re-run, or a hand-publish that got in first. Asking
+          # costs one request and an unnecessary upload is not recoverable.
           if curl -sf "https://crates.io/api/v1/crates/taimux/$v" >/dev/null 2>&1; then
             echo "taimux $v is already on crates.io, nothing to do"
-            exit 0
+            echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
 
-          cargo publish --workspace --no-verify
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+        if: steps.gate.outputs.publish == 'true'
+
+      # --no-verify because the crates were already built and tested by `check`
+      # on this exact commit; re-verifying here would rebuild all four to learn
+      # what CI already knows.
+      - name: cargo publish --workspace
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --workspace --no-verify
