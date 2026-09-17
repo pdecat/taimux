@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.11.1](https://github.com/pdecat/taimux/compare/v0.11.0...v0.11.1) (2026-09-17)
+
+
+### Bug fixes
+
+* a question whose own footer wrapped read as working ([af29254](https://github.com/pdecat/taimux/commit/af2925476183e535dcde1ff0afd813f19f5d3904))
+* a session idle at the prompt no longer reads as working ([9e7a282](https://github.com/pdecat/taimux/commit/9e7a282e4374fcf4e70dde728a1c8a17448eee55))
+* two guards that were not guarding, found by the same CI run ([6691eb3](https://github.com/pdecat/taimux/commit/6691eb34665c97c9e3fc192b42174bce6f644afe))
+
 ## [0.11.0](https://github.com/pdecat/taimux/compare/v0.10.0...v0.11.0) (2026-09-15)
 
 
