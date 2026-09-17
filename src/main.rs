@@ -67,7 +67,7 @@ fn resurrect_main(file: &str, dry: bool, verbose: bool) -> i32 {
     let state_of = |id: &str, pid: i32| -> String {
         let screen = taimux_core::tmux::capture(id).unwrap_or_default();
         taimux_core::state::merge(
-            taimux_core::state::classify(&screen),
+            &screen,
             taimux_core::hook::hook_entry(id, pid)
                 .as_ref()
                 .map(|(st, _)| st.as_str()),
@@ -882,7 +882,7 @@ fn main() {
             let state_of = |id: &str, pid: i32| -> String {
                 let screen = taimux_core::tmux::capture(id).unwrap_or_default();
                 taimux_core::state::merge(
-                    taimux_core::state::classify(&screen),
+                    &screen,
                     taimux_core::hook::hook_entry(id, pid)
                         .as_ref()
                         .map(|(st, _)| st.as_str()),

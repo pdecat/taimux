@@ -110,11 +110,16 @@ So the pane's own **screen** decides both, off a single capture per pane (about
 - **waiting**: a dialog draws a numbered choice list, and the lowest prompt line
   on screen is the one that owns it, with the footer read over the last few lines
   as well (on a narrow pane the footer wraps and pushes the list off the bottom);
-- **working**: the activity line Claude keeps above the prompt box, which live
-  ends in an ellipsis and a bracketed counter (`Twisting… (35s · ↓ 1.6k tokens)`)
-  where a finished turn reads `Crunched for 9m 55s` with no brackets at all.
+- **working**: the turn line Claude keeps above the prompt box. There is one per
+  turn and it is rewritten in place, from `✽ Twisting… (35s · ↓ 1.6k tokens)`
+  while the turn runs to `✻ Crunched for 9m 55s · done 11:07 AM` once it ends, so
+  the **lowest** one on screen belongs to the most recent turn and says whether
+  that turn is still going. It is read over the last sixteen lines of content,
+  because it is nowhere near the bottom of the screen: Claude tucks a tip row and
+  a token count under it, and then come the title rule, the prompt box, its own
+  rule and two status rows. Measured across 39 live panes it sat 2 to 9 lines up.
 
-A dialog wins over an activity line, since it is the row that wants you.
+A dialog wins over a turn line, since it is the row that wants you.
 
 **Tab** cycles the list through those states, one at a time and back, with two
 further stops that are not states at all. One asks a different question of the
@@ -146,8 +151,8 @@ Reading a pane from the outside has limits, and two of them matter:
 - **the permission mode** is on the screen, one line under the prompt box, but a
   dialog or a redraw hides it, and a dialog is up exactly when a session is asking
   you something. Measured on 22 real panes: readable on 20;
-- **working** is inferred from the *shape* of an activity line, which is the most
-  fragile thing in this tool and has broken once already.
+- **working** is inferred from the *shape* of the turn line, which is the most
+  fragile thing in this tool and has broken twice now.
 
 So a session can report itself instead, through its own hooks:
 
@@ -184,14 +189,24 @@ morning and two minutes into a turn, whose line had not moved in two days.
 
 A dialog **on screen** still outranks the line, because that is the state which
 must never be wrong: granting a permission fires no event of its own, so the line
-reads `input` until the tool actually runs and `PostToolUse` lands. Two more
-readings overrule it, the same argument in both directions:
-an idle prompt box under a line reading `input`, and an activity line with a live
-counter under one reading `idle`. Either way the screen says positively what the
-line has stopped saying, and a line that stopped being written is what a missed
-event leaves behind. Everything else the line says is taken as it stands, which is
-why it is written at all: `run` and `input` tell the list what a screen often
-cannot show.
+reads `input` until the tool actually runs and `PostToolUse` lands. Three more
+readings overrule it, the same argument in all three directions: an idle prompt
+box under a line reading `input`, a turn line with a live counter under one
+reading `idle`, and a **finished** turn line with an idle prompt box under it and
+no later turn line below, under one reading `run`. Each time the screen says
+positively what the line has stopped saying, and a line that stopped being written
+is what a missed event leaves behind. That last one is the worst of the three
+while it lasts, because nothing ever clears it: the pane sits in the working list
+for good and `restart` refuses it. Found on a session Claude had put in the
+background (`sessionKind: "bg"`), whose own transcript recorded `taimux hook`
+running on every `Stop` with no error while the line it should have written never
+appeared, six and a half hours of it.
+
+The **absence** of a turn line is deliberately not read as an answer, and that is
+what keeps the last rule honest: a session part way through a long reply can show
+no turn line at all, and then `run` is the only thing that knows. Everything else
+the line says is taken as it stands, which is why it is written at all: `run` and
+`input` tell the list what a screen often cannot show.
 
 The permission mode has nowhere else to come from, and it is shown by how brightly
 the agent name is painted, so it costs the summary no width:

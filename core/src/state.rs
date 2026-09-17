@@ -5,9 +5,11 @@
 //! rather than capturing it themselves, which is what makes them testable at all:
 //! the bash originals are the same shape for the same reason.
 //!
-//! This is the most fragile reading in the tool (it infers "working" from the
-//! *shape* of an activity line, and that has broken once already), so the rules
-//! are copied deliberately rather than improved.
+//! This is the most fragile reading in the tool (it infers what a turn is doing
+//! from the *shape* of one line, and that has broken twice now), so the rules are
+//! copied from the prototype deliberately rather than improved. Where one has
+//! been changed since, `turn_marker` and the third overrule in `merge`, the live
+//! screen that forced it is quoted in the comment.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
@@ -67,31 +69,79 @@ pub fn awaits_input(screen: &str) -> bool {
     false
 }
 
-/// Mid-turn.
+/// What the turn line above the prompt box says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Turn {
+    /// Still going: an ellipsis and a bracketed counter.
+    Running,
+    /// Over: a duration and a finishing time, and no brackets at all.
+    Done,
+}
+
+/// Still going: `Twisting… (35s · ↓ 1.6k tokens)`, or `(esc to interrupt)`.
+fn is_running_line(l: &str) -> bool {
+    // …<spaces>( followed by a digit or "esc "
+    l.match_indices('…').any(|(i, _)| {
+        let rest = l[i + '…'.len_utf8()..].trim_start();
+        match rest.strip_prefix('(') {
+            Some(after) => {
+                after.starts_with("esc ") || after.starts_with(|c: char| c.is_ascii_digit())
+            }
+            None => false,
+        }
+    })
+}
+
+/// Over: `✻ Crunched for 9m 55s · done 11:07 AM`.
 ///
-/// The activity line Claude keeps above the prompt box ends in an ellipsis and a
-/// bracketed counter, `Twisting… (35s · ↓ 1.6k tokens)` or `(esc to interrupt)`,
-/// where a FINISHED turn reads `Crunched for 9m 55s` with no brackets at all.
-/// That difference is the whole test. Blank lines are dropped first so the last
-/// eight lines are eight lines of content.
-pub fn is_working(screen: &str) -> bool {
+/// Both halves are needed. A duration alone is ordinary prose, and the finishing
+/// time alone is not a shape anything else writes. Sampled over the whole pane
+/// list the verb varies freely (Churned, Sautéed, Cogitated, Brewed) and the
+/// time reaches back through `done Monday 10:10 PM` to
+/// `done Friday, Sep 4, 12:51 PM`, but ` for ` and `· done ` are in every one of
+/// them. The leading glyph is deliberately not read: it animates while the turn
+/// runs, so keying on it would be keying on a frame.
+fn is_done_line(l: &str) -> bool {
+    l.contains(" for ") && l.contains("· done ")
+}
+
+/// The lowest turn line on screen, if there is one.
+///
+/// Claude draws ONE of these per turn and rewrites it in place, from the running
+/// shape to the finished one, so the lowest on screen belongs to the most recent
+/// turn and no earlier turn can contradict it. That ordering is the whole reason
+/// this returns a single answer rather than two independent booleans: a finished
+/// turn still shows its line while the next turn is being typed, and the next
+/// turn's line appears BELOW it.
+///
+/// Read over the last sixteen lines of content rather than the whole capture,
+/// because both shapes turn up in ordinary output: a session discussing this very
+/// code prints them. Sixteen because the turn line is nowhere near the bottom of
+/// the screen. Under it Claude tucks a tip row and a token count, then the title
+/// rule, the prompt box, its own rule and two status rows. Measured across 39
+/// live panes it sat 2 to 9 lines up. The eight this started at was one line
+/// short of the common case, which is how a session twenty-six minutes into a
+/// turn read as idle off its screen, and left the hook line carrying it alone.
+pub fn turn_marker(screen: &str) -> Option<Turn> {
     screen
         .lines()
         .filter(|l| !l.trim().is_empty())
         .rev()
-        .take(8)
-        .any(|l| {
-            // …<spaces>( followed by a digit or "esc "
-            l.match_indices('…').any(|(i, _)| {
-                let rest = l[i + '…'.len_utf8()..].trim_start();
-                match rest.strip_prefix('(') {
-                    Some(after) => {
-                        after.starts_with("esc ") || after.starts_with(|c: char| c.is_ascii_digit())
-                    }
-                    None => false,
-                }
-            })
+        .take(16)
+        .find_map(|l| {
+            if is_running_line(l) {
+                Some(Turn::Running)
+            } else if is_done_line(l) {
+                Some(Turn::Done)
+            } else {
+                None
+            }
         })
+}
+
+/// Mid-turn.
+pub fn is_working(screen: &str) -> bool {
+    turn_marker(screen) == Some(Turn::Running)
 }
 
 /// The screen's own answer, in the order the bash version asks: a dialog wins
@@ -125,19 +175,34 @@ pub fn classify(screen: &str) -> State {
 /// reading `idle` is one that stopped being written, its turn's opening `run`
 /// having never landed. Found on a pane working away at a two-minute turn whose
 /// line was two days old: the list called it idle, and `restart` counted it
-/// restartable. Only `idle` is overruled here: a `run` line, and an `input` line
-/// the screen does not contradict, are the hook telling the list what the screen
-/// cannot show, which is the whole reason it is written. A session streaming a
-/// long answer shows no activity line at all while it does so.
-pub fn merge(screen: State, hook: Option<&str>) -> State {
-    if screen == State::Input {
+/// restartable.
+///
+/// A `run` line goes stale too, and that one is the worst of the three, because
+/// nothing ever clears it: the pane sits in the working list for good and
+/// `restart` refuses it. Found on a session Claude had put in the background
+/// (`sessionKind: "bg"`), whose own transcript records `taimux hook` running on
+/// every `Stop` with no error while the line it should have written never
+/// appeared, six and a half hours of it. The screen answers that one too, but
+/// only positively: a FINISHED turn line, with an idle prompt box under it and no
+/// later turn line anywhere below, is the screen saying the turn is over as
+/// plainly as the box says no dialog is up. The absence of a turn line is NOT
+/// that answer and is left to the hook, which is the case this must not break: a
+/// session streaming a long reply can show no turn line at all while it does so,
+/// and then `run` is the only thing that knows.
+pub fn merge(screen: &str, hook: Option<&str>) -> State {
+    let screen_state = classify(screen);
+    if screen_state == State::Input {
         return State::Input;
     }
-    if screen == State::Idle && hook == Some("input") {
+    if screen_state == State::Idle && hook == Some("input") {
         return State::Idle;
     }
-    if screen == State::Run && hook == Some("idle") {
+    if screen_state == State::Run && hook == Some("idle") {
         return State::Run;
+    }
+    if screen_state == State::Idle && hook == Some("run") && turn_marker(screen) == Some(Turn::Done)
+    {
+        return State::Idle;
     }
     match hook {
         Some("run") => return State::Run,
@@ -148,10 +213,10 @@ pub fn merge(screen: State, hook: Option<&str>) -> State {
     }
     // No line, or one nobody recognises: a screen that could not be read reads as
     // idle, exactly as it always did.
-    if screen == State::Unknown {
+    if screen_state == State::Unknown {
         State::Idle
     } else {
-        screen
+        screen_state
     }
 }
 
@@ -198,9 +263,55 @@ mod tests {
         assert!(is_working("✽ Twisting… (35s · ↓ 1.6k tokens)\n ❯ "));
         assert!(is_working("✽ Thinking… (esc to interrupt)\n ❯ "));
         // no brackets: the turn is over
-        assert!(!is_working("Crunched for 9m 55s\n ❯ "));
+        assert!(!is_working("✻ Crunched for 9m 55s · done 11:07 AM\n ❯ "));
         // an ellipsis with no counter after it is just prose
         assert!(!is_working("I will think about it…\n ❯ "));
+    }
+
+    #[test]
+    fn the_rows_claude_tucks_under_the_turn_line_do_not_bury_it() {
+        // Live capture shape: the tip and the token count sit under the activity
+        // line, then the title rule, the box, its rule and two status rows, which
+        // put it NINE lines of content up. Read over eight it vanished, and a
+        // session twenty-six minutes into a turn read idle off its screen.
+        let s = "✽ Symbioting… (26m 38s · ↓ 19.7k tokens)\n\
+                 \x20 ⎿  Tip: Use git worktrees to run multiple sessions\n\
+                 \x20                                    253088 tokens\n\
+                 ──── gitlab-webhook-receiver: fix-ruff-ci-errors ─\n\
+                 ❯ \n\
+                 ─────────────────────────────────────────────────\n\
+                 \x20 Opus 5 (1M, max) v2.1.274  [█░░] 25%  5h 12%\n\
+                 \x20 ⏵⏵ auto mode on (shift+tab to cycle) · 11 agents\n";
+        assert_eq!(turn_marker(s), Some(Turn::Running));
+        assert_eq!(classify(s), State::Run);
+    }
+
+    #[test]
+    fn a_finished_turn_line_is_read_whatever_the_verb_and_however_old() {
+        for l in [
+            "✻ Churned for 1m 19s · done 11:07 AM",
+            "✻ Sautéed for 10m 29s · done 11:19 PM",
+            "✻ Cogitated for 13m 58s · done Friday 11:34 AM",
+            "✻ Brewed for 6m 54s · done Thursday, Aug 27, 2:52 PM",
+        ] {
+            assert_eq!(turn_marker(&format!("{l}\n ❯ ")), Some(Turn::Done), "{l}");
+        }
+        // half of the shape is not the shape: prose, and the status row
+        assert_eq!(turn_marker("it ran for 3 hours\n ❯ "), None);
+        assert_eq!(turn_marker("· done deal\n ❯ "), None);
+    }
+
+    #[test]
+    fn the_lowest_turn_line_is_the_one_that_counts() {
+        // The turn now running, under the one it followed: Claude writes a fresh
+        // line per turn and the previous turn's finished one stays on screen.
+        let s = "✻ Churned for 30s · done 9:56 AM\n> do the next thing\n✽ Thinking… (2s)\n ❯ ";
+        assert_eq!(turn_marker(s), Some(Turn::Running));
+        // and the other way round, which is the whole point: a turn that ended
+        assert_eq!(
+            turn_marker("✽ Thinking… (2s)\n✻ Churned for 30s · done 9:56 AM\n ❯ "),
+            Some(Turn::Done)
+        );
     }
 
     #[test]
@@ -216,17 +327,27 @@ mod tests {
         assert_eq!(classify(""), State::Unknown);
     }
 
+    // The four screens the merge rules turn on. FINISHED and RUNNING carry a turn
+    // line; STREAMING is the one that carries none, which is a real screen and not
+    // a contrived one: a session part way through a long reply shows exactly this.
+    const DIALOG: &str = "✽ Twisting… (35s)\n  2. No\n ❯ 1. Yes\n";
+    const FINISHED: &str = "✻ Crunched for 9m 55s · done 11:07 AM\n ❯ \n";
+    const RUNNING: &str = "✽ Twisting… (35s · ↓ 1.6k tokens)\n ❯ \n";
+    const STREAMING: &str = "…and that is the third reason it cannot work.\n ❯ \n";
+    const UNREADABLE: &str = "just some output\n";
+
     #[test]
     fn a_dialog_on_screen_beats_any_hook_line() {
         for hook in [None, Some("run"), Some("idle"), Some("input")] {
-            assert_eq!(merge(State::Input, hook), State::Input);
+            assert_eq!(merge(DIALOG, hook), State::Input);
         }
     }
 
     #[test]
     fn an_idle_screen_overrules_a_stale_hook_input() {
         // the 38-hour-old line that made a pane refuse every restart
-        assert_eq!(merge(State::Idle, Some("input")), State::Idle);
+        assert_eq!(merge(FINISHED, Some("input")), State::Idle);
+        assert_eq!(merge(STREAMING, Some("input")), State::Idle);
     }
 
     #[test]
@@ -234,26 +355,43 @@ mod tests {
         // The line a session's last turn closed with, left behind because the
         // opening `run` of the turn now on screen never arrived. Two days old on
         // the pane this was found on, which was mid-turn at the time.
-        assert_eq!(merge(State::Run, Some("idle")), State::Run);
+        assert_eq!(merge(RUNNING, Some("idle")), State::Run);
         // …and only that screen overrules it: every other reading still takes
         // the line at its word (the rest of them in the test below).
-        assert_eq!(merge(State::Idle, Some("idle")), State::Idle);
+        assert_eq!(merge(FINISHED, Some("idle")), State::Idle);
+    }
+
+    #[test]
+    fn a_finished_turn_on_screen_overrules_a_stale_hook_run() {
+        // The line a backgrounded session left behind: six and a half hours at
+        // `run` with the pane sitting at an empty prompt box under a turn that
+        // had plainly ended, and `restart` refusing it the whole time.
+        assert_eq!(merge(FINISHED, Some("run")), State::Idle);
+    }
+
+    #[test]
+    fn a_screen_with_no_turn_line_still_leaves_run_alone() {
+        // The case the rule above must not eat. A session part way through a long
+        // reply shows no turn line at all, so the screen has nothing to say and
+        // the hook is the only thing that knows a turn is in flight.
+        assert_eq!(merge(STREAMING, Some("run")), State::Run);
+        assert_eq!(merge(UNREADABLE, Some("run")), State::Run);
     }
 
     #[test]
     fn otherwise_the_hook_is_taken_as_it_stands() {
-        assert_eq!(merge(State::Idle, Some("run")), State::Run);
-        assert_eq!(merge(State::Unknown, Some("idle")), State::Idle);
+        assert_eq!(merge(UNREADABLE, Some("idle")), State::Idle);
         // a session mid-permission is working, for the list's purposes
-        assert_eq!(merge(State::Run, Some("input")), State::Run);
-        assert_eq!(merge(State::Unknown, Some("input")), State::Run);
+        assert_eq!(merge(RUNNING, Some("input")), State::Run);
+        assert_eq!(merge(UNREADABLE, Some("input")), State::Run);
     }
 
     #[test]
     fn with_no_hook_the_screen_decides_and_unreadable_reads_as_idle() {
-        assert_eq!(merge(State::Run, None), State::Run);
-        assert_eq!(merge(State::Idle, None), State::Idle);
-        assert_eq!(merge(State::Unknown, None), State::Idle);
-        assert_eq!(merge(State::Unknown, Some("nonsense")), State::Idle);
+        assert_eq!(merge(RUNNING, None), State::Run);
+        assert_eq!(merge(FINISHED, None), State::Idle);
+        assert_eq!(merge(STREAMING, None), State::Idle);
+        assert_eq!(merge(UNREADABLE, None), State::Idle);
+        assert_eq!(merge(UNREADABLE, Some("nonsense")), State::Idle);
     }
 }

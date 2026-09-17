@@ -210,10 +210,7 @@ pub fn list_rows(
             }
         };
         let hook = crate::hook::hook_entry(id, pid);
-        let merged = crate::state::merge(
-            crate::state::classify(&screen),
-            hook.as_ref().map(|(st, _)| st.as_str()),
-        );
+        let merged = crate::state::merge(&screen, hook.as_ref().map(|(st, _)| st.as_str()));
         let mode = hook.map(|(_, m)| m).unwrap_or_else(|| "-".into());
 
         let exe = std::fs::read_link(format!("/proc/{}/exe", pid))

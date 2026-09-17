@@ -254,7 +254,7 @@ pub fn plan(
         }
 
         let screen = e.capture(id);
-        let st = state::merge(state::classify(&screen), e.hook_state(id, pid).as_deref());
+        let st = state::merge(&screen, e.hook_state(id, pid).as_deref());
         if st.as_str() != "idle" && !o.include_busy {
             p.skipped.push(format!(
                 "{} {}  {}, {}: rerun when idle, or --include-busy",
