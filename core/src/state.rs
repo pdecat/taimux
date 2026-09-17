@@ -32,11 +32,12 @@ impl State {
 
 /// Waiting for an answer.
 ///
-/// Two checks, and both earn their place: on a narrow pane the footer wraps and
-/// pushes the choice list off the bottom, leaving the footer as the only sign.
-/// The footer is read over the last few lines only, and the choice list from the
-/// LOWEST prompt line, because both of those strings turn up in ordinary
-/// scrollback and a window of lines cannot be trusted.
+/// Two checks, and both earn their place: on a narrow pane the choice list wraps
+/// and pushes itself off the bottom, leaving the footer as the only sign, and
+/// narrower still the footer wraps too. The footer is read over the last few
+/// lines only, joined, and the choice list from the LOWEST prompt line, because
+/// both of those strings turn up in ordinary scrollback and a window of lines
+/// cannot be trusted.
 pub fn awaits_input(screen: &str) -> bool {
     // Trailing blank lines go first, and that is not tidiness. `capture-pane`
     // pads its output to the full pane height, so a dialog sitting four lines up
@@ -49,11 +50,21 @@ pub fn awaits_input(screen: &str) -> bool {
     while lines.last().is_some_and(|l| l.trim().is_empty()) {
         lines.pop();
     }
+    // Those lines are searched JOINED, not one at a time, because on a narrow
+    // enough pane the footer itself wraps: `Esc to` on one line and `cancel` on
+    // the next is the same footer, and reading them separately finds neither.
+    // Joining can only add matches and never lose one, since a phrase that fits
+    // inside a single line survives the join intact. Found on a 46-column pane
+    // sitting on an unanswered question that the list was calling `run`, which is
+    // the reading this whole function exists to prevent.
     let tail = lines.len().saturating_sub(4);
-    if lines[tail..]
+    let footer = lines[tail..]
         .iter()
-        .any(|l| l.contains("Do you want to proceed?") || l.contains("Esc to cancel"))
-    {
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if footer.contains("Do you want to proceed?") || footer.contains("Esc to cancel") {
         return true;
     }
     // the lowest line carrying the prompt glyph is the one that owns the dialog
@@ -236,6 +247,21 @@ mod tests {
         // a narrow pane pushes the choice list off the bottom
         assert!(awaits_input("blah\nblah\n Esc to cancel · Tab to amend\n"));
         assert!(awaits_input("Do you want to proceed?\n"));
+    }
+
+    #[test]
+    fn a_footer_that_wrapped_across_two_lines_is_still_a_footer() {
+        // 46 columns, live: the question's own footer breaks mid-phrase, so
+        // neither line carries it and the pane read as working instead of asking.
+        let s = "──────────────────────────────\n\
+                 \x20 6. Chat about this\n\
+                 \n\
+                 Enter to select · ↑/↓ to navigate · Esc to\n\
+                 cancel\n";
+        assert!(awaits_input(s));
+        assert_eq!(classify(s), State::Input);
+        // and the join does not invent one out of two unrelated lines
+        assert!(!awaits_input("nothing to escape here\ncancel the order\n"));
     }
 
     #[test]

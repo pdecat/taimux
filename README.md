@@ -109,7 +109,10 @@ So the pane's own **screen** decides both, off a single capture per pane (about
 
 - **waiting**: a dialog draws a numbered choice list, and the lowest prompt line
   on screen is the one that owns it, with the footer read over the last few lines
-  as well (on a narrow pane the footer wraps and pushes the list off the bottom);
+  as well (on a narrow pane the list wraps and pushes itself off the bottom,
+  leaving the footer as the only sign). Those lines are read **joined**, because
+  narrower still the footer wraps too, and `Esc to` on one line with `cancel` on
+  the next is the same footer;
 - **working**: the turn line Claude keeps above the prompt box. There is one per
   turn and it is rewritten in place, from `✽ Twisting… (35s · ↓ 1.6k tokens)`
   while the turn runs to `✻ Crunched for 9m 55s · done 11:07 AM` once it ends, so
