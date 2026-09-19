@@ -10,11 +10,12 @@
 # overflow pages and WAL frames. `--no-default-features` drops it, and with it
 # those two agents' rows, which is the only thing it can affect.
 #
-# turso is a SQLite rewritten in Rust, and it was taken on the understanding that
-# that made it C-free. It does not: `turso_core` depends on `simsimd`, a C SIMD
-# library, mandatorily and not behind a feature. So a C compiler IS needed, and
-# the static musl build needs one targeting musl. The release build carries that
-# now; it spent a day asserting the opposite in a comment.
+# It was turso, a SQLite rewritten in Rust, taken on the understanding that that
+# made it C-free. It does not: `turso_core` depends on `simsimd`, a C SIMD
+# library, mandatorily and not behind a feature. With that argument gone the
+# measurement was one-sided, so this is rusqlite: 1.49 MB of static binary
+# against 11.9, a 15s cold build against 75, 32 crates against 324, and a real
+# SQLITE_OPEN_READ_ONLY that turso does not offer.
 [package]
 name = "taimux-core"
 version = "0.11.1"
@@ -27,10 +28,10 @@ description = "Shared internals for taimux: pane scanning, transcripts, agent ve
 [features]
 default = ["sqlite"]
 # read OpenCode's and Codex's SQLite session stores
-sqlite = ["dep:turso"]
+sqlite = ["dep:rusqlite"]
 
 [dependencies]
-# default-features off on purpose: `fts` (full-text search) and `mimalloc` are
-# both dead weight for four SELECTs, and dropping them takes ~3.7 MB off the
-# binary every host downloads.
-turso = { version = "0.7.2", default-features = false, optional = true }
+# `bundled` compiles SQLite's own amalgamation in, so there is no system libsqlite3
+# to find at build time or at run time, which is what a single static artefact
+# needs. Default features otherwise: they are the C library's own, and small.
+rusqlite = { version = "0.40.2", features = ["bundled"], optional = true }

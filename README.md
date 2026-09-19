@@ -868,7 +868,8 @@ in it worth knowing:
 - **OpenCode is a database**, which changes three things: the key is a session id
   rather than a path, there is no transcript to point a handoff at, and its
   fingerprint is a timestamp rather than a byte count. It is read through
-  [turso](https://github.com/tursodatabase/turso), a SQLite rewritten in Rust.
+  [rusqlite](https://github.com/rusqlite/rusqlite), with SQLite's own
+  amalgamation compiled in so there is nothing to find on the host.
   `--no-default-features` drops it and nothing else.
 
 **Nothing is ever written where those tools live.** SQLite creates a `-wal` file
@@ -1391,25 +1392,34 @@ Five dependencies, and the count is deliberate: everything that can be std is
 Gemini names its project directories with). Four are what the picker below needs:
 `ratatui`, `crossterm`, `unicode-width` and `fuzzy-matcher`.
 
-The fifth is [turso](https://github.com/tursodatabase/turso), a SQLite rewritten
-in Rust, and it is the only one `core` takes. Two agents keep their
-conversations in a database rather than in files, and reading a b-tree by hand is
-several hundred lines that have to be right about overflow pages and WAL frames.
-It sits behind the default `sqlite` feature, so `--no-default-features` drops it,
-and the only thing that changes is that [OpenCode and Codex rows](#past-sessions)
-stop appearing.
+The fifth is [rusqlite](https://github.com/rusqlite/rusqlite) with `bundled`,
+and it is the only one `core` takes. Two agents keep their conversations in a
+database rather than in files, and reading a b-tree by hand is several hundred
+lines that have to be right about overflow pages and WAL frames. It sits behind
+the default `sqlite` feature, so `--no-default-features` drops it, and the only
+thing that changes is that [OpenCode and Codex rows](#past-sessions) stop
+appearing. The static artefact goes from 1.1 MB to 2.4 MB, and a C compiler is
+needed to build it, since `bundled` compiles SQLite's own amalgamation.
 
-Two things about it are worth stating plainly, because the first was claimed here
-in the wrong direction for a day:
+**It was [turso](https://github.com/tursodatabase/turso) for a day**, a SQLite
+rewritten in Rust, chosen for being C-free and written up here as such. It is
+not: `turso_core` depends on `simsimd`, a C SIMD library, mandatorily and not
+behind a feature, which surfaced as a release build that compiled cleanly and
+then failed to link. With the one argument for it gone, the measurement was
+one-sided. Same machine, same profile, same three queries against the same
+71 MB database:
 
-- **It is not C-free.** turso's own code is Rust, but it depends on `simsimd`, a
-  C SIMD library, and that dependency is mandatory rather than feature-gated. So
-  a C compiler is needed after all, and the static musl build needs one that
-  targets musl (`musl-tools`). The build that publishes the release says so now;
-  it used to say the opposite.
-- **It is not small.** The static artefact went from 1.1 MB to 12.8 MB, so turso
-  is most of what a host downloads. That bought one agent's history on this
-  machine, and it is the trade to re-examine if it ever buys less.
+| | turso | rusqlite |
+|---|---|---|
+| static binary | 11.9 MB | 1.49 MB |
+| cold build | 75s | 15s |
+| dependency tree | 324 crates | 32 |
+| opening the file | 16ms | 0.08ms |
+| a 2000-row join | 26ms | 7ms |
+
+rusqlite also has a real `SQLITE_OPEN_READ_ONLY`, which turso does not offer at
+all, and a synchronous API, so the hand-rolled `block_on` that drove turso's
+futures is gone with it.
 
 ## Not a shell script
 

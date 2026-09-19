@@ -6,67 +6,40 @@
 //! `~/.codex/state_*.sqlite`. Everything else here reads JSONL, which needs no
 //! engine at all.
 //!
-//! **The engine is [turso](https://github.com/tursodatabase/turso)**, a SQLite
-//! rewritten in Rust, rather than a binding to the C library. It is behind a
-//! Cargo feature (`sqlite`, on by default) because it is the only dependency
-//! this crate takes and it is a large one: a build that turns it off loses the
-//! OpenCode and Codex rows and nothing else.
+//! **The engine is [rusqlite](https://github.com/rusqlite/rusqlite)** with
+//! `bundled`, which compiles SQLite's own amalgamation in. It is behind a Cargo
+//! feature (`sqlite`, on by default) because it is the only dependency this
+//! crate takes: a build that turns it off loses the OpenCode and Codex rows and
+//! nothing else.
 //!
-//! **It is not C-free, whatever was assumed when it was chosen.** turso's own
-//! code is Rust, but `turso_core` depends on `simsimd`, a C SIMD library, and
-//! that dependency is mandatory rather than feature-gated. So the static musl
-//! build needs a C compiler targeting musl, and without one the link ends in
-//! `cannot find -lsimsimd` after everything has compiled. Worth knowing before
-//! reaching for it for the same reason again.
+//! **It was [turso](https://github.com/tursodatabase/turso) first**, a SQLite
+//! rewritten in Rust, chosen for being C-free. It is not: `turso_core` depends
+//! on `simsimd`, a C SIMD library, mandatorily and not behind a feature, so the
+//! static musl build needed a C compiler either way and a missing one surfaced
+//! as `cannot find -lsimsimd` after everything had compiled. With that argument
+//! gone nothing else favoured it, and the measured gap is not close: on this
+//! machine, same profile, same three queries against the same 71 MB database,
+//! the static binary went 11.9 MB to 1.49 MB, the cold build 75s to 15s, the
+//! dependency tree 324 crates to 32, opening the file 16ms to 0.08ms and a
+//! 2000-row join 26ms to 7ms. It also has a real `SQLITE_OPEN_READ_ONLY`, which
+//! turso does not offer at all, and a synchronous API, which is why there is no
+//! `block_on` in this file any more.
 //!
-//! **Read through a symlink, never the path itself.** SQLite creates a `-wal`
-//! beside whatever path it was handed, so opening `opencode.db` where it lives
-//! drops a file into a directory that belongs to another program while that
-//! program may be running. Opening a symlink in this tool's own runtime
-//! directory puts the `-wal` next to the SYMLINK instead: same bytes read, same
-//! inode, nothing at all written where OpenCode can see it. Verified: after a
-//! read the source file's mtime, size and md5 are unchanged and its directory
-//! has gained nothing.
+//! **Read through a symlink, never the path itself.** SQLite creates `-wal` and
+//! `-shm` beside whatever path it was handed, and it does so even opened
+//! READ-ONLY, so opening `opencode.db` where it lives drops files into a
+//! directory that belongs to another program while that program may be running.
+//! Opening a symlink in this tool's own runtime directory puts them next to the
+//! SYMLINK instead: same bytes read, same inode, nothing at all written where
+//! OpenCode can see it. Verified both ways: after a read the source file's
+//! mtime, size and md5 are unchanged and its directory has gained nothing.
 //!
-//! Nothing here writes. Every statement this module is given is a `SELECT`, and
-//! a store that cannot be opened or a query that fails is an agent with no rows
-//! in the list rather than an error anybody sees.
+//! Nothing here writes, and the open flag says so as well as the usage: every
+//! statement this module is given is a `SELECT`, and a store that cannot be
+//! opened or a query that fails is an agent with no rows in the list rather than
+//! an error anybody sees.
 
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
-use std::task::{Context, Poll, Waker};
-use std::time::{Duration, Instant};
-
-/// How long one database call may take before it is abandoned.
-///
-/// The indexer runs behind the picker, so a wedged read costs a pass rather than
-/// a keystroke; the bound exists so that it costs one pass and not the process.
-const DEADLINE: Duration = Duration::from_secs(10);
-
-/// Drive one future to completion on this thread, or give up.
-///
-/// This is the whole of the async story here: no runtime, no executor crate, no
-/// threads. `core` has no dependencies to spare on scheduling futures that
-/// resolve on their first poll, and turso's local IO completes its futures
-/// inline, so this loop normally polls once. The waker wakes nothing because
-/// nothing is waiting to be woken; the deadline is there because "normally" is
-/// not "always".
-fn block_on<F: Future>(fut: F) -> Option<F::Output> {
-    let mut fut = Box::pin(fut);
-    let waker = Waker::noop();
-    let mut cx = Context::from_waker(waker);
-    let until = Instant::now() + DEADLINE;
-    loop {
-        if let Poll::Ready(v) = Pin::new(&mut fut).as_mut().poll(&mut cx) {
-            return Some(v);
-        }
-        if Instant::now() >= until {
-            return None;
-        }
-        std::thread::yield_now();
-    }
-}
 
 /// One column of one row, in the three shapes these stores actually use.
 #[derive(Debug, Clone, PartialEq)]
@@ -135,26 +108,33 @@ fn link_to(src: &Path) -> Option<PathBuf> {
 
 #[cfg(feature = "sqlite")]
 mod engine {
-    use super::{block_on, link_to, Cell};
+    use super::{link_to, Cell};
     use std::path::Path;
 
-    /// An open store. Read-only by use rather than by flag: every query this
-    /// crate sends is a `SELECT`.
+    /// An open store, read-only by flag as well as by use.
     pub struct Db {
-        conn: turso::Connection,
+        conn: rusqlite::Connection,
     }
 
     /// Open a store, through a symlink so nothing lands beside the original.
     ///
     /// `None` for a store that is not there, which is the ordinary case: most
     /// machines have one or two of these agents installed, not all of them.
+    ///
+    /// `NO_MUTEX` because this connection never leaves the thread that made it,
+    /// and `READ_ONLY` because nothing here has any business writing. The second
+    /// does NOT stop SQLite creating its sidecar files, which is what the
+    /// symlink is for.
     pub fn open(path: &Path) -> Option<Db> {
         if !path.is_file() {
             return None;
         }
         let link = link_to(path)?;
-        let db = block_on(turso::Builder::new_local(&link.to_string_lossy()).build())?.ok()?;
-        let conn = db.connect().ok()?;
+        let conn = rusqlite::Connection::open_with_flags(
+            &link,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .ok()?;
         Some(Db { conn })
     }
 
@@ -164,30 +144,28 @@ mod engine {
         /// Whole rather than streamed because every query here is bounded by the
         /// shape of the question: a session list, or one session's messages.
         pub fn rows(&self, sql: &str) -> Option<Vec<Vec<Cell>>> {
-            let mut rows = block_on(self.conn.query(sql, ()))?.ok()?;
+            let mut st = self.conn.prepare(sql).ok()?;
+            let n = st.column_count();
             let mut out = Vec::new();
-            loop {
-                match block_on(rows.next())? {
-                    Ok(Some(row)) => {
-                        let n = row.column_count();
-                        let mut cells = Vec::with_capacity(n);
-                        for i in 0..n {
-                            cells.push(match row.get_value(i) {
-                                Ok(turso::Value::Text(s)) => Cell::Text(s),
-                                Ok(turso::Value::Integer(i)) => Cell::Int(i),
-                                Ok(turso::Value::Real(f)) => Cell::Int(f as i64),
-                                Ok(turso::Value::Blob(b)) => {
-                                    Cell::Text(String::from_utf8_lossy(&b).into_owned())
-                                }
-                                _ => Cell::Null,
-                            });
+            let mut q = st.query([]).ok()?;
+            while let Ok(Some(row)) = q.next() {
+                let mut cells = Vec::with_capacity(n);
+                for i in 0..n {
+                    cells.push(match row.get_ref(i) {
+                        Ok(rusqlite::types::ValueRef::Text(t)) => {
+                            Cell::Text(String::from_utf8_lossy(t).into_owned())
                         }
-                        out.push(cells);
-                    }
-                    Ok(None) => return Some(out),
-                    Err(_) => return None,
+                        Ok(rusqlite::types::ValueRef::Integer(v)) => Cell::Int(v),
+                        Ok(rusqlite::types::ValueRef::Real(f)) => Cell::Int(f as i64),
+                        Ok(rusqlite::types::ValueRef::Blob(b)) => {
+                            Cell::Text(String::from_utf8_lossy(b).into_owned())
+                        }
+                        _ => Cell::Null,
+                    });
                 }
+                out.push(cells);
             }
+            Some(out)
         }
     }
 }
