@@ -41,6 +41,12 @@ install-release *args:
 # committed yet. It lands at ~/.local/bin/taimux with the launcher symlinked at
 # it, which is exactly where the release path puts it too.
 
+# There used to be an `ln -sfn` here linking the launcher at the binary. Both
+# sides of it became the same path in the jumpmux -> taimux rename, so it was
+# `ln`-ing a file to itself, which errors and (with `set -e`) failed the recipe
+# AFTER the binary had already landed. The launcher symlink is `taimux install`'s
+# job on each host anyway, not this one's.
+
 # push the working-tree build to a host, e.g. `just ship ha`
 ship host: build-static
     scp -q target/x86_64-unknown-linux-musl/release/taimux \
@@ -48,7 +54,6 @@ ship host: build-static
     ssh {{ host }} 'set -e; mkdir -p ~/.local/bin; \
         mv -f /tmp/taimux.new ~/.local/bin/taimux; \
         chmod +x ~/.local/bin/taimux; \
-        ln -sfn ~/.local/bin/taimux ~/.local/bin/taimux; \
         printf "%s: %s rows from list\n" "$(hostname)" "$(~/.local/bin/taimux list | wc -l)"'
 
 # Not the same as `install-release`: this is the tip of main, which is AHEAD of
