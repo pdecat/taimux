@@ -1,6 +1,18 @@
 # golden: bash _fzf_rows output, frozen 2026-09-02 before the fzf code
 # was deleted. Regenerating this is not possible any more, and that is
 # the point: it is the layout specification now. See tests/run.sh.
+#
+# ONE case has been superseded since, deliberately and on the record: a
+# summary too long for the window used to run past the right edge and
+# take the path, agent and version columns off the screen with it. It is
+# cut with an ellipsis now instead. The frozen file had it both ways: its
+# own header calls those columns "pinned to the right edge, in fixed
+# columns, so it costs the summary no width", which is the behaviour here
+# and was never what the code did. It went unnoticed while every summary
+# came from a pane title, a handful of words; a PAST session's summary is
+# whatever it was asked to do, up to eighty characters, and those rows
+# arrived pushing the table out of the window. 108 lines, rows %13 and
+# %17, at widths 99, 100 and 130. Nothing else in this file has moved.
 ### width=0 cur=. only=. q=. newver=2.1.258
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer  [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests  [90m~                             [0m   [35mgemini[0m  [2;35m0.41.2[0m	%11
@@ -1049,11 +1061,11 @@
 [36m  w:1.1        [0m [1;33m✳[0m Refactor the auth layer           [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  w:1.2        [0m [2m◐[0m tests                             [90m~                             [0m   [35mgemini[0m  [2;35m0.41.2[0m	%11
 [36m  o:3.1        [0m   X                                 [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[36m  o:12.11      [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11      [0m   a long summary that runs past t…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1     [0m [2m◐[0m                                   [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1    [0m   main2 beside main                 [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  maste:6.1    [0m [1;33m✳[0m no version at all                 [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1     [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1     [0m   a name that is a prefix of anot…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7  [0m [2m◐[0m over on another host              [90mother/work                    [0m   [35mclaude[0m [2;35m2.1.100[0m	ha:%6
 [36m  la/main:2.2  [0m   a second host                     [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                             [90m                              [0m	laptop-two:unreachable
@@ -1062,11 +1074,11 @@
 [36m  w:1.1        [0m [1;33m✳[0m Refactor the auth layer           [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  w:1.2        [0m [2m◐[0m tests                                          [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  o:3.1        [0m   X                                                       [90m⌕ …nothing to do with it…[0m	%12
-[36m  o:12.11      [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11      [0m   a long summary that runs past t…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1     [0m [2m◐[0m                                   [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1    [0m   main2 beside main                 [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  maste:6.1    [0m [1;33m✳[0m no version at all                 [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1     [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1     [0m   a name that is a prefix of anot…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7  [0m [2m◐[0m over on another host                                    [90m⌕ …said something remote…[0m	ha:%6
 [36m  la/main:2.2  [0m   a second host                     [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                             [90m                              [0m	laptop-two:unreachable
@@ -1075,11 +1087,11 @@
 [36m  w:1.1        [0m [1;33m✳[0m Refactor the auth layer           [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  w:1.2        [0m [2m◐[0m tests                                          [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  o:3.1        [0m   X                                                       [90m⌕ …nothing to do with it…[0m	%12
-[36m  o:12.11      [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11      [0m   a long summary that runs past t…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1     [0m [2m◐[0m                                   [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1    [0m   main2 beside main                 [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  maste:6.1    [0m [1;33m✳[0m no version at all                 [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1     [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1     [0m   a name that is a prefix of anot…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7  [0m [2m◐[0m over on another host                                    [90m⌕ …said something remote…[0m	ha:%6
 [36m  la/main:2.2  [0m   a second host                     [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                             [90m                              [0m	laptop-two:unreachable
@@ -1088,11 +1100,11 @@
 [36m  w:1.1        [0m [1;33m✳[0m Refactor the auth layer           [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  w:1.2        [0m [2m◐[0m tests                                          [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  o:3.1        [0m   X                                                       [90m⌕ …nothing to do with it…[0m	%12
-[36m  o:12.11      [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11      [0m   a long summary that runs past t…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1     [0m [2m◐[0m                                   [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1    [0m   main2 beside main                 [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  maste:6.1    [0m [1;33m✳[0m no version at all                 [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1     [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1     [0m   a name that is a prefix of anot…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7  [0m [2m◐[0m over on another host                                    [90m⌕ …said something remote…[0m	ha:%6
 [36m  la/main:2.2  [0m   a second host                     [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                             [90m                              [0m	laptop-two:unreachable
@@ -1127,25 +1139,25 @@
 [36m  ha/m:1.7[0m [2m◐[0m over on another host                                         [90m⌕ …said something remote…[0m	ha:%6
 ### width=99 cur=. only=idle q=. newver=2.1.258
 [36m  o:3.1      [0m   X                                   [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[36m  o:12.11    [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11    [0m   a long summary that runs past the…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1  [0m   main2 beside main                   [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mas:7.1    [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  la/main:2.2[0m   a second host                       [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=99 cur=. only=idle q=auth newver=2.1.258
 [36m  o:3.1      [0m   X                                                         [90m⌕ …nothing to do with it…[0m	%12
-[36m  o:12.11    [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11    [0m   a long summary that runs past the…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1  [0m   main2 beside main                   [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mas:7.1    [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  la/main:2.2[0m   a second host                       [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=99 cur=. only=idle q=auth layer newver=2.1.258
 [36m  o:3.1      [0m   X                                                         [90m⌕ …nothing to do with it…[0m	%12
-[36m  o:12.11    [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11    [0m   a long summary that runs past the…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1  [0m   main2 beside main                   [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mas:7.1    [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  la/main:2.2[0m   a second host                       [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=99 cur=. only=idle q=AUTH newver=2.1.258
 [36m  o:3.1      [0m   X                                                         [90m⌕ …nothing to do with it…[0m	%12
-[36m  o:12.11    [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11    [0m   a long summary that runs past the…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1  [0m   main2 beside main                   [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mas:7.1    [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  la/main:2.2[0m   a second host                       [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
@@ -1165,11 +1177,11 @@
 [36m  w:1.1        [0m [1;33m✳[0m Refactor the auth layer           [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  w:1.2        [0m [2m◐[0m tests                             [90m~                             [0m   [35mgemini[0m  [2;35m0.41.2[0m	%11
 [36m  o:3.1        [0m   X                                 [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[33m● o:12.11      [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● o:12.11      [0m   a long summary that runs past t…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1     [0m [2m◐[0m                                   [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1    [0m   main2 beside main                 [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  maste:6.1    [0m [1;33m✳[0m no version at all                 [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1     [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1     [0m   a name that is a prefix of anot…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7  [0m [2m◐[0m over on another host              [90mother/work                    [0m   [35mclaude[0m [2;35m2.1.100[0m	ha:%6
 [36m  la/main:2.2  [0m   a second host                     [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                             [90m                              [0m	laptop-two:unreachable
@@ -1178,11 +1190,11 @@
 [36m  w:1.1        [0m [1;33m✳[0m Refactor the auth layer           [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  w:1.2        [0m [2m◐[0m tests                                          [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  o:3.1        [0m   X                                                       [90m⌕ …nothing to do with it…[0m	%12
-[33m● o:12.11      [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● o:12.11      [0m   a long summary that runs past t…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1     [0m [2m◐[0m                                   [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1    [0m   main2 beside main                 [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  maste:6.1    [0m [1;33m✳[0m no version at all                 [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1     [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1     [0m   a name that is a prefix of anot…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7  [0m [2m◐[0m over on another host                                    [90m⌕ …said something remote…[0m	ha:%6
 [36m  la/main:2.2  [0m   a second host                     [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                             [90m                              [0m	laptop-two:unreachable
@@ -1191,11 +1203,11 @@
 [36m  w:1.1        [0m [1;33m✳[0m Refactor the auth layer           [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  w:1.2        [0m [2m◐[0m tests                                          [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  o:3.1        [0m   X                                                       [90m⌕ …nothing to do with it…[0m	%12
-[33m● o:12.11      [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● o:12.11      [0m   a long summary that runs past t…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1     [0m [2m◐[0m                                   [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1    [0m   main2 beside main                 [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  maste:6.1    [0m [1;33m✳[0m no version at all                 [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1     [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1     [0m   a name that is a prefix of anot…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7  [0m [2m◐[0m over on another host                                    [90m⌕ …said something remote…[0m	ha:%6
 [36m  la/main:2.2  [0m   a second host                     [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                             [90m                              [0m	laptop-two:unreachable
@@ -1204,11 +1216,11 @@
 [36m  w:1.1        [0m [1;33m✳[0m Refactor the auth layer           [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  w:1.2        [0m [2m◐[0m tests                                          [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  o:3.1        [0m   X                                                       [90m⌕ …nothing to do with it…[0m	%12
-[33m● o:12.11      [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● o:12.11      [0m   a long summary that runs past t…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1     [0m [2m◐[0m                                   [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1    [0m   main2 beside main                 [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  maste:6.1    [0m [1;33m✳[0m no version at all                 [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1     [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1     [0m   a name that is a prefix of anot…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7  [0m [2m◐[0m over on another host                                    [90m⌕ …said something remote…[0m	ha:%6
 [36m  la/main:2.2  [0m   a second host                     [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                             [90m                              [0m	laptop-two:unreachable
@@ -1243,25 +1255,25 @@
 [36m  ha/m:1.7[0m [2m◐[0m over on another host                                         [90m⌕ …said something remote…[0m	ha:%6
 ### width=99 cur=%13 only=idle q=. newver=2.1.258
 [36m  o:3.1      [0m   X                                   [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[33m● o:12.11    [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● o:12.11    [0m   a long summary that runs past the…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1  [0m   main2 beside main                   [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mas:7.1    [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  la/main:2.2[0m   a second host                       [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=99 cur=%13 only=idle q=auth newver=2.1.258
 [36m  o:3.1      [0m   X                                                         [90m⌕ …nothing to do with it…[0m	%12
-[33m● o:12.11    [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● o:12.11    [0m   a long summary that runs past the…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1  [0m   main2 beside main                   [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mas:7.1    [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  la/main:2.2[0m   a second host                       [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=99 cur=%13 only=idle q=auth layer newver=2.1.258
 [36m  o:3.1      [0m   X                                                         [90m⌕ …nothing to do with it…[0m	%12
-[33m● o:12.11    [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● o:12.11    [0m   a long summary that runs past the…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1  [0m   main2 beside main                   [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mas:7.1    [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  la/main:2.2[0m   a second host                       [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=99 cur=%13 only=idle q=AUTH newver=2.1.258
 [36m  o:3.1      [0m   X                                                         [90m⌕ …nothing to do with it…[0m	%12
-[33m● o:12.11    [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● o:12.11    [0m   a long summary that runs past the…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1  [0m   main2 beside main                   [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mas:7.1    [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  la/main:2.2[0m   a second host                       [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
@@ -1281,11 +1293,11 @@
 [36m  w:1.1        [0m [1;33m✳[0m Refactor the auth layer           [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  w:1.2        [0m [2m◐[0m tests                             [90m~                             [0m   [35mgemini[0m  [2;35m0.41.2[0m	%11
 [36m  o:3.1        [0m   X                                 [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[36m  o:12.11      [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11      [0m   a long summary that runs past t…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1     [0m [2m◐[0m                                   [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1    [0m   main2 beside main                 [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  maste:6.1    [0m [1;33m✳[0m no version at all                 [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1     [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1     [0m   a name that is a prefix of anot…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [33m● ha/main:1.7  [0m [2m◐[0m over on another host              [90mother/work                    [0m   [35mclaude[0m [2;35m2.1.100[0m	ha:%6
 [36m  la/main:2.2  [0m   a second host                     [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                             [90m                              [0m	laptop-two:unreachable
@@ -1294,11 +1306,11 @@
 [36m  w:1.1        [0m [1;33m✳[0m Refactor the auth layer           [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  w:1.2        [0m [2m◐[0m tests                                          [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  o:3.1        [0m   X                                                       [90m⌕ …nothing to do with it…[0m	%12
-[36m  o:12.11      [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11      [0m   a long summary that runs past t…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1     [0m [2m◐[0m                                   [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1    [0m   main2 beside main                 [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  maste:6.1    [0m [1;33m✳[0m no version at all                 [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1     [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1     [0m   a name that is a prefix of anot…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [33m● ha/main:1.7  [0m [2m◐[0m over on another host                                    [90m⌕ …said something remote…[0m	ha:%6
 [36m  la/main:2.2  [0m   a second host                     [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                             [90m                              [0m	laptop-two:unreachable
@@ -1307,11 +1319,11 @@
 [36m  w:1.1        [0m [1;33m✳[0m Refactor the auth layer           [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  w:1.2        [0m [2m◐[0m tests                                          [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  o:3.1        [0m   X                                                       [90m⌕ …nothing to do with it…[0m	%12
-[36m  o:12.11      [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11      [0m   a long summary that runs past t…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1     [0m [2m◐[0m                                   [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1    [0m   main2 beside main                 [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  maste:6.1    [0m [1;33m✳[0m no version at all                 [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1     [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1     [0m   a name that is a prefix of anot…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [33m● ha/main:1.7  [0m [2m◐[0m over on another host                                    [90m⌕ …said something remote…[0m	ha:%6
 [36m  la/main:2.2  [0m   a second host                     [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                             [90m                              [0m	laptop-two:unreachable
@@ -1320,11 +1332,11 @@
 [36m  w:1.1        [0m [1;33m✳[0m Refactor the auth layer           [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  w:1.2        [0m [2m◐[0m tests                                          [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  o:3.1        [0m   X                                                       [90m⌕ …nothing to do with it…[0m	%12
-[36m  o:12.11      [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11      [0m   a long summary that runs past t…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1     [0m [2m◐[0m                                   [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1    [0m   main2 beside main                 [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  maste:6.1    [0m [1;33m✳[0m no version at all                 [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1     [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1     [0m   a name that is a prefix of anot…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [33m● ha/main:1.7  [0m [2m◐[0m over on another host                                    [90m⌕ …said something remote…[0m	ha:%6
 [36m  la/main:2.2  [0m   a second host                     [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                             [90m                              [0m	laptop-two:unreachable
@@ -1359,25 +1371,25 @@
 [33m● ha/m:1.7[0m [2m◐[0m over on another host                                         [90m⌕ …said something remote…[0m	ha:%6
 ### width=99 cur=ha:%6 only=idle q=. newver=2.1.258
 [36m  o:3.1      [0m   X                                   [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[36m  o:12.11    [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11    [0m   a long summary that runs past the…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1  [0m   main2 beside main                   [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mas:7.1    [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  la/main:2.2[0m   a second host                       [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=99 cur=ha:%6 only=idle q=auth newver=2.1.258
 [36m  o:3.1      [0m   X                                                         [90m⌕ …nothing to do with it…[0m	%12
-[36m  o:12.11    [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11    [0m   a long summary that runs past the…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1  [0m   main2 beside main                   [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mas:7.1    [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  la/main:2.2[0m   a second host                       [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=99 cur=ha:%6 only=idle q=auth layer newver=2.1.258
 [36m  o:3.1      [0m   X                                                         [90m⌕ …nothing to do with it…[0m	%12
-[36m  o:12.11    [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11    [0m   a long summary that runs past the…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1  [0m   main2 beside main                   [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mas:7.1    [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  la/main:2.2[0m   a second host                       [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=99 cur=ha:%6 only=idle q=AUTH newver=2.1.258
 [36m  o:3.1      [0m   X                                                         [90m⌕ …nothing to do with it…[0m	%12
-[36m  o:12.11    [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  o:12.11    [0m   a long summary that runs past the…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1  [0m   main2 beside main                   [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mas:7.1    [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  la/main:2.2[0m   a second host                       [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
@@ -1397,11 +1409,11 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer    [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                      [90m~                             [0m   [35mgemini[0m  [2;35m0.41.2[0m	%11
 [36m  ops:3.1              [0m   X                          [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                            [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all          [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1             [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1             [0m   a name that is a prefix …  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7          [0m [2m◐[0m over on another host       [90mother/work                    [0m   [35mclaude[0m [2;35m2.1.100[0m	ha:%6
 [36m  laptop-two/main:2.2  [0m   a second host              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                              [90m                              [0m	laptop-two:unreachable
@@ -1410,11 +1422,11 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer    [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                   [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                            [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all          [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1             [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1             [0m   a name that is a prefix …  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7          [0m [2m◐[0m over on another host                             [90m⌕ …said something remote…[0m	ha:%6
 [36m  laptop-two/main:2.2  [0m   a second host              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                              [90m                              [0m	laptop-two:unreachable
@@ -1423,11 +1435,11 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer    [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                   [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                            [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all          [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1             [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1             [0m   a name that is a prefix …  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7          [0m [2m◐[0m over on another host                             [90m⌕ …said something remote…[0m	ha:%6
 [36m  laptop-two/main:2.2  [0m   a second host              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                              [90m                              [0m	laptop-two:unreachable
@@ -1436,11 +1448,11 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer    [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                   [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                            [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all          [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1             [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1             [0m   a name that is a prefix …  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7          [0m [2m◐[0m over on another host                             [90m⌕ …said something remote…[0m	ha:%6
 [36m  laptop-two/main:2.2  [0m   a second host              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                              [90m                              [0m	laptop-two:unreachable
@@ -1475,27 +1487,27 @@
 [36m  ha/main:1.7  [0m [2m◐[0m over on another host                                     [90m⌕ …said something remote…[0m	ha:%6
 ### width=100 cur=. only=idle q=. newver=2.1.258
 [36m  ops:3.1            [0m   X                            [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs p…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main            [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
-[36m  mast:7.1           [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1           [0m   a name that is a prefix of…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=100 cur=. only=idle q=auth newver=2.1.258
 [36m  ops:3.1            [0m   X                                                  [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs p…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main            [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
-[36m  mast:7.1           [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1           [0m   a name that is a prefix of…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=100 cur=. only=idle q=auth layer newver=2.1.258
 [36m  ops:3.1            [0m   X                                                  [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs p…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main            [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
-[36m  mast:7.1           [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1           [0m   a name that is a prefix of…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=100 cur=. only=idle q=AUTH newver=2.1.258
 [36m  ops:3.1            [0m   X                                                  [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs p…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main            [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
-[36m  mast:7.1           [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1           [0m   a name that is a prefix of…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=100 cur=. only=dead q=. newver=2.1.258
 [36m  3d[0m   an ended conversation                                                  [90mproj/web[0m [35mclaude[0m [2;35m2.1.90[0m	dead:/home/testuser/.claude/projects/p/abc.jsonl
@@ -1513,11 +1525,11 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer    [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                      [90m~                             [0m   [35mgemini[0m  [2;35m0.41.2[0m	%11
 [36m  ops:3.1              [0m   X                          [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[33m● ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11            [0m   a long summary that runs…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                            [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all          [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1             [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1             [0m   a name that is a prefix …  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7          [0m [2m◐[0m over on another host       [90mother/work                    [0m   [35mclaude[0m [2;35m2.1.100[0m	ha:%6
 [36m  laptop-two/main:2.2  [0m   a second host              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                              [90m                              [0m	laptop-two:unreachable
@@ -1526,11 +1538,11 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer    [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                   [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                [90m⌕ …nothing to do with it…[0m	%12
-[33m● ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11            [0m   a long summary that runs…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                            [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all          [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1             [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1             [0m   a name that is a prefix …  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7          [0m [2m◐[0m over on another host                             [90m⌕ …said something remote…[0m	ha:%6
 [36m  laptop-two/main:2.2  [0m   a second host              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                              [90m                              [0m	laptop-two:unreachable
@@ -1539,11 +1551,11 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer    [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                   [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                [90m⌕ …nothing to do with it…[0m	%12
-[33m● ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11            [0m   a long summary that runs…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                            [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all          [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1             [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1             [0m   a name that is a prefix …  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7          [0m [2m◐[0m over on another host                             [90m⌕ …said something remote…[0m	ha:%6
 [36m  laptop-two/main:2.2  [0m   a second host              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                              [90m                              [0m	laptop-two:unreachable
@@ -1552,11 +1564,11 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer    [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                   [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                [90m⌕ …nothing to do with it…[0m	%12
-[33m● ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11            [0m   a long summary that runs…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                            [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all          [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1             [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1             [0m   a name that is a prefix …  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  ha/main:1.7          [0m [2m◐[0m over on another host                             [90m⌕ …said something remote…[0m	ha:%6
 [36m  laptop-two/main:2.2  [0m   a second host              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                              [90m                              [0m	laptop-two:unreachable
@@ -1591,27 +1603,27 @@
 [36m  ha/main:1.7  [0m [2m◐[0m over on another host                                     [90m⌕ …said something remote…[0m	ha:%6
 ### width=100 cur=%13 only=idle q=. newver=2.1.258
 [36m  ops:3.1            [0m   X                            [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[33m● ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11          [0m   a long summary that runs p…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main            [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
-[36m  mast:7.1           [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1           [0m   a name that is a prefix of…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=100 cur=%13 only=idle q=auth newver=2.1.258
 [36m  ops:3.1            [0m   X                                                  [90m⌕ …nothing to do with it…[0m	%12
-[33m● ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11          [0m   a long summary that runs p…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main            [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
-[36m  mast:7.1           [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1           [0m   a name that is a prefix of…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=100 cur=%13 only=idle q=auth layer newver=2.1.258
 [36m  ops:3.1            [0m   X                                                  [90m⌕ …nothing to do with it…[0m	%12
-[33m● ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11          [0m   a long summary that runs p…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main            [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
-[36m  mast:7.1           [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1           [0m   a name that is a prefix of…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=100 cur=%13 only=idle q=AUTH newver=2.1.258
 [36m  ops:3.1            [0m   X                                                  [90m⌕ …nothing to do with it…[0m	%12
-[33m● ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11          [0m   a long summary that runs p…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main            [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
-[36m  mast:7.1           [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1           [0m   a name that is a prefix of…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=100 cur=%13 only=dead q=. newver=2.1.258
 [36m  3d[0m   an ended conversation                                                  [90mproj/web[0m [35mclaude[0m [2;35m2.1.90[0m	dead:/home/testuser/.claude/projects/p/abc.jsonl
@@ -1629,11 +1641,11 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer    [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                      [90m~                             [0m   [35mgemini[0m  [2;35m0.41.2[0m	%11
 [36m  ops:3.1              [0m   X                          [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                            [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all          [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1             [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1             [0m   a name that is a prefix …  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [33m● ha/main:1.7          [0m [2m◐[0m over on another host       [90mother/work                    [0m   [35mclaude[0m [2;35m2.1.100[0m	ha:%6
 [36m  laptop-two/main:2.2  [0m   a second host              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                              [90m                              [0m	laptop-two:unreachable
@@ -1642,11 +1654,11 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer    [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                   [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                            [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all          [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1             [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1             [0m   a name that is a prefix …  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [33m● ha/main:1.7          [0m [2m◐[0m over on another host                             [90m⌕ …said something remote…[0m	ha:%6
 [36m  laptop-two/main:2.2  [0m   a second host              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                              [90m                              [0m	laptop-two:unreachable
@@ -1655,11 +1667,11 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer    [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                   [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                            [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all          [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1             [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1             [0m   a name that is a prefix …  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [33m● ha/main:1.7          [0m [2m◐[0m over on another host                             [90m⌕ …said something remote…[0m	ha:%6
 [36m  laptop-two/main:2.2  [0m   a second host              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                              [90m                              [0m	laptop-two:unreachable
@@ -1668,11 +1680,11 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer    [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                   [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                            [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all          [90m~/b                           [0m   [35mclaude[0m	%16
-[36m  mast:7.1             [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1             [0m   a name that is a prefix …  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [33m● ha/main:1.7          [0m [2m◐[0m over on another host                             [90m⌕ …said something remote…[0m	ha:%6
 [36m  laptop-two/main:2.2  [0m   a second host              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 [36m  laptop-two: no answer[0m                              [90m                              [0m	laptop-two:unreachable
@@ -1707,27 +1719,27 @@
 [33m● ha/main:1.7  [0m [2m◐[0m over on another host                                     [90m⌕ …said something remote…[0m	ha:%6
 ### width=100 cur=ha:%6 only=idle q=. newver=2.1.258
 [36m  ops:3.1            [0m   X                            [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs p…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main            [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
-[36m  mast:7.1           [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1           [0m   a name that is a prefix of…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=100 cur=ha:%6 only=idle q=auth newver=2.1.258
 [36m  ops:3.1            [0m   X                                                  [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs p…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main            [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
-[36m  mast:7.1           [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1           [0m   a name that is a prefix of…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=100 cur=ha:%6 only=idle q=auth layer newver=2.1.258
 [36m  ops:3.1            [0m   X                                                  [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs p…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main            [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
-[36m  mast:7.1           [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1           [0m   a name that is a prefix of…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=100 cur=ha:%6 only=idle q=AUTH newver=2.1.258
 [36m  ops:3.1            [0m   X                                                  [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs p…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main            [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
-[36m  mast:7.1           [0m   a name that is a prefix of another  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
+[36m  mast:7.1           [0m   a name that is a prefix of…  [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=100 cur=ha:%6 only=dead q=. newver=2.1.258
 [36m  3d[0m   an ended conversation                                                  [90mproj/web[0m [35mclaude[0m [2;35m2.1.90[0m	dead:/home/testuser/.claude/projects/p/abc.jsonl
@@ -1745,7 +1757,7 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer                                  [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                                    [90m~                             [0m   [35mgemini[0m  [2;35m0.41.2[0m	%11
 [36m  ops:3.1              [0m   X                                                        [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narr…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                                                          [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main                                        [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all                                        [90m~/b                           [0m   [35mclaude[0m	%16
@@ -1758,7 +1770,7 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer                                  [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                                                 [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                                              [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narr…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                                                          [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main                                        [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all                                        [90m~/b                           [0m   [35mclaude[0m	%16
@@ -1771,7 +1783,7 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer                                  [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                                                 [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                                              [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narr…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                                                          [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main                                        [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all                                        [90m~/b                           [0m   [35mclaude[0m	%16
@@ -1784,7 +1796,7 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer                                  [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                                                 [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                                              [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narr…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                                                          [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main                                        [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all                                        [90m~/b                           [0m   [35mclaude[0m	%16
@@ -1823,25 +1835,25 @@
 [36m  ha/main:1.7  [0m [2m◐[0m over on another host                                                                   [90m⌕ …said something remote…[0m	ha:%6
 ### width=130 cur=. only=idle q=. newver=2.1.258
 [36m  ops:3.1            [0m   X                                                          [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main                                          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mast:7.1           [0m   a name that is a prefix of another                         [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                                              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=130 cur=. only=idle q=auth newver=2.1.258
 [36m  ops:3.1            [0m   X                                                                                [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main                                          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mast:7.1           [0m   a name that is a prefix of another                         [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                                              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=130 cur=. only=idle q=auth layer newver=2.1.258
 [36m  ops:3.1            [0m   X                                                                                [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main                                          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mast:7.1           [0m   a name that is a prefix of another                         [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                                              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=130 cur=. only=idle q=AUTH newver=2.1.258
 [36m  ops:3.1            [0m   X                                                                                [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main                                          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mast:7.1           [0m   a name that is a prefix of another                         [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                                              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
@@ -1861,7 +1873,7 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer                                  [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                                    [90m~                             [0m   [35mgemini[0m  [2;35m0.41.2[0m	%11
 [36m  ops:3.1              [0m   X                                                        [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[33m● ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11            [0m   a long summary that runs past the right edge of a narr…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                                                          [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main                                        [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all                                        [90m~/b                           [0m   [35mclaude[0m	%16
@@ -1874,7 +1886,7 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer                                  [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                                                 [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                                              [90m⌕ …nothing to do with it…[0m	%12
-[33m● ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11            [0m   a long summary that runs past the right edge of a narr…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                                                          [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main                                        [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all                                        [90m~/b                           [0m   [35mclaude[0m	%16
@@ -1887,7 +1899,7 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer                                  [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                                                 [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                                              [90m⌕ …nothing to do with it…[0m	%12
-[33m● ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11            [0m   a long summary that runs past the right edge of a narr…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                                                          [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main                                        [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all                                        [90m~/b                           [0m   [35mclaude[0m	%16
@@ -1900,7 +1912,7 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer                                  [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                                                 [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                                              [90m⌕ …nothing to do with it…[0m	%12
-[33m● ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11            [0m   a long summary that runs past the right edge of a narr…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                                                          [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main                                        [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all                                        [90m~/b                           [0m   [35mclaude[0m	%16
@@ -1939,25 +1951,25 @@
 [36m  ha/main:1.7  [0m [2m◐[0m over on another host                                                                   [90m⌕ …said something remote…[0m	ha:%6
 ### width=130 cur=%13 only=idle q=. newver=2.1.258
 [36m  ops:3.1            [0m   X                                                          [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[33m● ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11          [0m   a long summary that runs past the right edge of a narrow…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main                                          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mast:7.1           [0m   a name that is a prefix of another                         [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                                              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=130 cur=%13 only=idle q=auth newver=2.1.258
 [36m  ops:3.1            [0m   X                                                                                [90m⌕ …nothing to do with it…[0m	%12
-[33m● ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11          [0m   a long summary that runs past the right edge of a narrow…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main                                          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mast:7.1           [0m   a name that is a prefix of another                         [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                                              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=130 cur=%13 only=idle q=auth layer newver=2.1.258
 [36m  ops:3.1            [0m   X                                                                                [90m⌕ …nothing to do with it…[0m	%12
-[33m● ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11          [0m   a long summary that runs past the right edge of a narrow…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main                                          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mast:7.1           [0m   a name that is a prefix of another                         [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                                              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=130 cur=%13 only=idle q=AUTH newver=2.1.258
 [36m  ops:3.1            [0m   X                                                                                [90m⌕ …nothing to do with it…[0m	%12
-[33m● ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[33m● ops:12.11          [0m   a long summary that runs past the right edge of a narrow…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main                                          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mast:7.1           [0m   a name that is a prefix of another                         [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                                              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
@@ -1977,7 +1989,7 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer                                  [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                                    [90m~                             [0m   [35mgemini[0m  [2;35m0.41.2[0m	%11
 [36m  ops:3.1              [0m   X                                                        [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narr…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                                                          [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main                                        [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all                                        [90m~/b                           [0m   [35mclaude[0m	%16
@@ -1990,7 +2002,7 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer                                  [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                                                 [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                                              [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narr…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                                                          [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main                                        [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all                                        [90m~/b                           [0m   [35mclaude[0m	%16
@@ -2003,7 +2015,7 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer                                  [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                                                 [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                                              [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narr…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                                                          [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main                                        [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all                                        [90m~/b                           [0m   [35mclaude[0m	%16
@@ -2016,7 +2028,7 @@
 [36m  work:1.1             [0m [1;33m✳[0m Refactor the auth layer                                  [90mproj/web                      [0m   [95mclaude[0m [33m2.1.229[0m	%10
 [36m  work:1.2             [0m [2m◐[0m tests                                                                 [90m⌕ …we rewrote the auth layer here…[0m	%11
 [36m  ops:3.1              [0m   X                                                                              [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11            [0m   a long summary that runs past the right edge of a narr…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main:4.1             [0m [2m◐[0m                                                          [90m/                             [0m       [1;95mpi[0m   [2;35m0.9.4[0m	%14
 [36m  main2:5.1            [0m   main2 beside main                                        [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  master:6.1           [0m [1;33m✳[0m no version at all                                        [90m~/b                           [0m   [35mclaude[0m	%16
@@ -2055,25 +2067,25 @@
 [33m● ha/main:1.7  [0m [2m◐[0m over on another host                                                                   [90m⌕ …said something remote…[0m	ha:%6
 ### width=130 cur=ha:%6 only=idle q=. newver=2.1.258
 [36m  ops:3.1            [0m   X                                                          [90m…r-very-long-project-name-here[0m    [35mcodex[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main                                          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mast:7.1           [0m   a name that is a prefix of another                         [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                                              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=130 cur=ha:%6 only=idle q=auth newver=2.1.258
 [36m  ops:3.1            [0m   X                                                                                [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main                                          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mast:7.1           [0m   a name that is a prefix of another                         [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                                              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=130 cur=ha:%6 only=idle q=auth layer newver=2.1.258
 [36m  ops:3.1            [0m   X                                                                                [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main                                          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mast:7.1           [0m   a name that is a prefix of another                         [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                                              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2
 ### width=130 cur=ha:%6 only=idle q=AUTH newver=2.1.258
 [36m  ops:3.1            [0m   X                                                                                [90m⌕ …nothing to do with it…[0m	%12
-[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow window and then some  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
+[36m  ops:12.11          [0m   a long summary that runs past the right edge of a narrow…  [90mx/y                           [0m [1;95mopencode[0m [2;35m1.18.10[0m	%13
 [36m  main2:5.1          [0m   main2 beside main                                          [90m~/a                           [0m   [35mclaude[0m [2;35m2.1.258[0m	%15
 [36m  mast:7.1           [0m   a name that is a prefix of another                         [90m~/c                           [0m   [35mclaude[0m [33m2.1.100[0m	%17
 [36m  laptop-two/main:2.2[0m   a second host                                              [90mhome/jordan                   [0m   [95mclaude[0m  [2;35m2.1.99[0m	laptop-two:%2

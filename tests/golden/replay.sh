@@ -24,7 +24,7 @@ FIX="$HERE/rows.tsv"
 HOME_FIX=/home/testuser
 SNIPS=$'%11\t…we rewrote the auth layer here…\n%12\t…nothing to do with it…\nha:%6\t…said something remote…'
 
-sed -n '1,3p' "$HERE/rows.expected"
+sed -n '1,15p' "$HERE/rows.expected"
 for width in 0 39 60 99 100 130 200; do
   for cur in '' %13 'ha:%6'; do
     for only in '' input run idle dead note; do

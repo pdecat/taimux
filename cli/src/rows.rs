@@ -536,6 +536,14 @@ pub fn build(lines: &str, input: &Input) -> Vec<Row> {
                 sum = t.clone();
             }
         }
+        // A summary that will not fit gives way, rather than pushing the table
+        // off the right edge. Nothing needed this while every summary came from
+        // a pane title, which is a handful of words; a PAST session's summary is
+        // whatever it was asked to do, up to eighty characters of it, and those
+        // rows arrived shoving the directory, the agent and the version out of
+        // the window. The columns beside it are the ones you read down the list,
+        // so the summary is the one that can afford to end in an ellipsis.
+        sum = fit(&sum, summary_room(input.width, vlen(&plabel), tailw));
 
         let mut cells = vec![
             cell(plabel.clone(), if is_cur { LABEL_CUR } else { LABEL_OTHER }),
@@ -630,6 +638,50 @@ pub fn build(lines: &str, input: &Input) -> Vec<Row> {
 fn gap_of(width: usize, plabel: &str, sum: &str, tailw: usize) -> usize {
     let used = vlen(plabel) + 1 + 2 + vlen(sum) + tailw;
     width.saturating_sub(used).max(2)
+}
+
+/// How much width a summary may have before it starts costing the table.
+///
+/// `0` means "as much as it likes", which is what an unmeasured window (width 0,
+/// the machine-readable path) and one too narrow to hold a table both get: in
+/// the first nothing is being drawn, and in the second there is no arrangement
+/// that fits, so a long summary is more use than a stump.
+fn summary_room(width: usize, labelw: usize, tailw: usize) -> usize {
+    if width == 0 {
+        return 0;
+    }
+    let chrome = labelw + 1 + 2 + 2 + tailw; // label, space, marker, gap, table
+    let room = width.saturating_sub(chrome);
+    if room < MIN_SUMMARY {
+        0
+    } else {
+        room
+    }
+}
+
+/// Below this a summary says nothing, so the table gives way instead.
+const MIN_SUMMARY: usize = 20;
+
+/// Cut to a display width, with an ellipsis where it was cut.
+///
+/// `0` is no limit. Character-wise and width-aware, so a double-width character
+/// counts for two and none is ever cut in half.
+fn fit(s: &str, room: usize) -> String {
+    if room == 0 || vlen(s) <= room {
+        return s.to_string();
+    }
+    let mut out = String::new();
+    let mut w = 0;
+    for c in s.chars() {
+        let cw = UnicodeWidthStr::width(c.to_string().as_str());
+        if w + cw > room.saturating_sub(1) {
+            break;
+        }
+        out.push(c);
+        w += cw;
+    }
+    out.push('…');
+    out
 }
 
 #[cfg(test)]
