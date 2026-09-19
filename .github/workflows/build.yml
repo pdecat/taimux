@@ -42,11 +42,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The rust-std for the target is all that is needed: this crate is pure
-      # Rust apart from three flock symbols, which musl provides, and Rust ships
-      # self-contained crt objects for *-linux-musl so no musl-gcc is involved.
+      # The rust-std for the target is NOT all that is needed, and that comment
+      # stood here until it was false. turso's `simsimd` dependency is a C
+      # library, mandatory and not feature-gated, so the musl target needs a C
+      # compiler that targets musl: Rust's self-contained crt objects cover its
+      # own runtime, not somebody else's C. Without `musl-gcc` the build script
+      # compiles against the host libc and the link ends in
+      # `cannot find -lsimsimd`.
       - name: musl target
-        run: rustup target add x86_64-unknown-linux-musl
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends musl-tools
 
       - uses: actions/cache@v6
         with:
@@ -54,10 +61,21 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: musl-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: musl-${{ runner.os }}-
+          # The prefix is a generation marker: bump it when a change makes an
+          # older `target/` actively wrong rather than merely stale, since
+          # `restore-keys` will otherwise happily hand one back. It went to 2
+          # when turso arrived, because the restored pre-turso tree had no
+          # `simsimd` build output and cargo did not notice.
+          key: musl2-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: musl2-${{ runner.os }}-
 
       - name: build
+        env:
+          # For the `cc` crate, so simsimd's C is compiled against musl's headers
+          # rather than the host's. The LINKER is deliberately left alone: rust's
+          # self-contained crt objects are what produce the static-pie, and
+          # pointing that at musl-gcc as well changes how it is linked.
+          CC_x86_64_unknown_linux_musl: musl-gcc
         run: cargo build --release --target x86_64-unknown-linux-musl
 
       # Prove it is actually static before publishing it, because the whole point

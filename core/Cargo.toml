@@ -7,10 +7,14 @@
 # ONE crate now earns its place, and only behind a feature. Two agents keep their
 # conversations in SQLite rather than in files (OpenCode, and recent Codex), and
 # reading a b-tree by hand is several hundred lines that have to be right about
-# overflow pages and WAL frames. turso is a pure-Rust SQLite, so the thing this
-# project actually ships survives it: no C toolchain, and one static musl binary.
-# `--no-default-features` drops it, and with it those two agents' rows, which is
-# the only thing it can affect.
+# overflow pages and WAL frames. `--no-default-features` drops it, and with it
+# those two agents' rows, which is the only thing it can affect.
+#
+# turso is a SQLite rewritten in Rust, and it was taken on the understanding that
+# that made it C-free. It does not: `turso_core` depends on `simsimd`, a C SIMD
+# library, mandatorily and not behind a feature. So a C compiler IS needed, and
+# the static musl build needs one targeting musl. The release build carries that
+# now; it spent a day asserting the opposite in a comment.
 [package]
 name = "taimux-core"
 version = "0.11.1"

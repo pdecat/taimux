@@ -868,9 +868,8 @@ in it worth knowing:
 - **OpenCode is a database**, which changes three things: the key is a session id
   rather than a path, there is no transcript to point a handoff at, and its
   fingerprint is a timestamp rather than a byte count. It is read through
-  [turso](https://github.com/tursodatabase/turso), a pure-Rust SQLite, so
-  `cargo build` still needs no C toolchain and the release is still one static
-  binary. `--no-default-features` drops it and nothing else.
+  [turso](https://github.com/tursodatabase/turso), a SQLite rewritten in Rust.
+  `--no-default-features` drops it and nothing else.
 
 **Nothing is ever written where those tools live.** SQLite creates a `-wal` file
 beside whatever path it is handed, so opening `opencode.db` where it lives drops
@@ -1392,19 +1391,25 @@ Five dependencies, and the count is deliberate: everything that can be std is
 Gemini names its project directories with). Four are what the picker below needs:
 `ratatui`, `crossterm`, `unicode-width` and `fuzzy-matcher`.
 
-The fifth is [turso](https://github.com/tursodatabase/turso), a pure-Rust SQLite,
-and it is the only one `core` takes. Two agents keep their conversations in a
-database rather than in files, and reading a b-tree by hand is several hundred
-lines that have to be right about overflow pages and WAL frames. Pure Rust is
-what makes it affordable: `cargo build` still needs no C toolchain and the
-release is still one static musl binary. It sits behind the default `sqlite`
-feature, so `--no-default-features` drops it, and the only thing that changes is
-that [OpenCode and Codex rows](#past-sessions) stop appearing.
+The fifth is [turso](https://github.com/tursodatabase/turso), a SQLite rewritten
+in Rust, and it is the only one `core` takes. Two agents keep their
+conversations in a database rather than in files, and reading a b-tree by hand is
+several hundred lines that have to be right about overflow pages and WAL frames.
+It sits behind the default `sqlite` feature, so `--no-default-features` drops it,
+and the only thing that changes is that [OpenCode and Codex rows](#past-sessions)
+stop appearing.
 
-It is not free: the static release artefact went from 1.1 MB to 12.8 MB, so
-turso is now most of what a host downloads. That is a real cost and it bought one
-agent's history on this machine, which is the trade to re-examine if it ever
-buys less.
+Two things about it are worth stating plainly, because the first was claimed here
+in the wrong direction for a day:
+
+- **It is not C-free.** turso's own code is Rust, but it depends on `simsimd`, a
+  C SIMD library, and that dependency is mandatory rather than feature-gated. So
+  a C compiler is needed after all, and the static musl build needs one that
+  targets musl (`musl-tools`). The build that publishes the release says so now;
+  it used to say the opposite.
+- **It is not small.** The static artefact went from 1.1 MB to 12.8 MB, so turso
+  is most of what a host downloads. That bought one agent's history on this
+  machine, and it is the trade to re-examine if it ever buys less.
 
 ## Not a shell script
 

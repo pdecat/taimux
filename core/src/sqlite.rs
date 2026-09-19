@@ -6,13 +6,18 @@
 //! `~/.codex/state_*.sqlite`. Everything else here reads JSONL, which needs no
 //! engine at all.
 //!
-//! **The engine is [turso](https://github.com/tursodatabase/turso)**, a pure-Rust
-//! SQLite, rather than a binding to the C library. That keeps the one thing this
-//! project actually ships intact: `cargo build` with no C toolchain, and one
-//! static musl binary every host downloads. It is the whole reason this is
-//! behind a Cargo feature (`sqlite`, on by default): a build that turns it off
-//! loses the OpenCode and Codex rows and nothing else, and it is a build anyone
-//! can still do.
+//! **The engine is [turso](https://github.com/tursodatabase/turso)**, a SQLite
+//! rewritten in Rust, rather than a binding to the C library. It is behind a
+//! Cargo feature (`sqlite`, on by default) because it is the only dependency
+//! this crate takes and it is a large one: a build that turns it off loses the
+//! OpenCode and Codex rows and nothing else.
+//!
+//! **It is not C-free, whatever was assumed when it was chosen.** turso's own
+//! code is Rust, but `turso_core` depends on `simsimd`, a C SIMD library, and
+//! that dependency is mandatory rather than feature-gated. So the static musl
+//! build needs a C compiler targeting musl, and without one the link ends in
+//! `cannot find -lsimsimd` after everything has compiled. Worth knowing before
+//! reaching for it for the same reason again.
 //!
 //! **Read through a symlink, never the path itself.** SQLite creates a `-wal`
 //! beside whatever path it was handed, so opening `opencode.db` where it lives
