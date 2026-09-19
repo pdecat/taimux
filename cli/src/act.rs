@@ -419,6 +419,167 @@ fn plan_of(exe: &str, args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
+// ── ctrl-o: carry a conversation into a different agent ─────────────────────
+
+/// Which conversation a row is about, and which tool wrote it.
+///
+/// Two shapes answer: a **past** row says so in its own id, and a **live claude
+/// pane** can be resolved to the transcript it is writing (the pane map, then
+/// the argv, which is the same ladder `restart` walks). A live pane running any
+/// other agent cannot be, and that is not a gap this key can close: which
+/// conversation a pane is on is something the agent has to publish, and claude
+/// is the only one that does.
+pub fn conversation_of(pane: &str) -> Result<(String, String), String> {
+    if let Some((agent, key)) = taimux_core::index::split_past_id(pane) {
+        return Ok((agent.to_string(), key.to_string()));
+    }
+    if pane == "dead:!" {
+        return Err("that row is a note, not a conversation".into());
+    }
+    if remote::pane_host(pane).is_some() {
+        return Err(format!(
+            "{} is on another host, and a handoff reads its transcript and starts \
+             an agent in its directory, both of which have to happen over there",
+            remote::pane_local(pane)
+        ));
+    }
+    let rows = taimux_core::panes::agent_rows();
+    let row = rows
+        .lines()
+        .map(|l| l.split('\t').collect::<Vec<_>>())
+        .find(|f| f.len() >= 5 && f[0] == pane)
+        // Every row in that scan is an agent pane, so a miss is either a pane
+        // that has closed or one running an ordinary shell. Neither has a
+        // conversation, and saying "gone" about the second would send you
+        // looking for a pane that is right there.
+        .ok_or_else(|| format!("{} is not running an agent, or is not there any more", pane))?;
+    if row[3] != "claude" {
+        return Err(format!(
+            "taimux cannot tell which conversation a {} pane is on, so there is \
+             nothing to hand over. Only claude publishes that",
+            row[3]
+        ));
+    }
+    let pid: i32 = row[4].parse().unwrap_or(0);
+    let cwd = std::fs::read_link(format!("/proc/{}/cwd", pid))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| row[2].to_string());
+    match taimux_core::conv::resolve_from_pane(pane, &cwd, pid) {
+        Some(r) => Ok(("claude".into(), r.transcript.to_string_lossy().into_owned())),
+        None => Err("that pane's conversation could not be identified".into()),
+    }
+}
+
+/// ctrl-o: pick a target agent, then open the conversation in it.
+pub fn handoff_one(pane: &str) {
+    let mut out = std::io::stdout();
+    clear(&mut out);
+
+    let (agent, key) = match conversation_of(pane) {
+        Ok(v) => v,
+        Err(why) => {
+            println!("\x1b[1mtaimux: nothing to hand off here\x1b[0m\n");
+            println!("  {}.\n", why);
+            any_key();
+            return;
+        }
+    };
+
+    // The source is not offered as a target: continuing a conversation in the
+    // tool that already has it is Enter, which resumes it rather than starting a
+    // fresh one carrying a summary of itself.
+    let targets: Vec<&str> = taimux_core::handoff::installed()
+        .into_iter()
+        .filter(|t| *t != agent)
+        .collect();
+    if targets.is_empty() {
+        println!("\x1b[1mtaimux: no other agent is installed\x1b[0m\n");
+        println!("  A handoff starts a DIFFERENT tool on this conversation, and");
+        println!("  {} is the only one on your PATH.\n", agent);
+        any_key();
+        return;
+    }
+
+    let meta = taimux_core::agents::meta(&agent, &key);
+    let title = if meta.title.is_empty() {
+        "(no title)"
+    } else {
+        &meta.title
+    };
+    println!(
+        "\x1b[1mtaimux: continue this {} conversation elsewhere\x1b[0m\n",
+        taimux_core::handoff::display_name(&agent)
+    );
+    println!("  \x1b[1;36m{}\x1b[0m", title);
+    println!(
+        "  \x1b[90m{}\x1b[0m\n",
+        if meta.cwd.is_empty() { "?" } else { &meta.cwd }
+    );
+    println!("  The prompt carries the task, the repository's state and the last");
+    println!("  few turns, and points at the transcript for the rest.\n");
+    for (i, t) in targets.iter().enumerate() {
+        println!(
+            "    \x1b[1m{}\x1b[0m  {}",
+            i + 1,
+            taimux_core::handoff::display_name(t)
+        );
+    }
+    println!("\n  Anything else cancels.");
+    let _ = out.flush();
+
+    let Pressed::Key(c) = read_one_key() else {
+        println!("\r\n  (no readable terminal to ask on)");
+        return;
+    };
+    let Some(target) = c
+        .to_digit(10)
+        .and_then(|n| targets.get(n as usize - 1).copied())
+    else {
+        return; // anything that is not one of the offered numbers cancels
+    };
+
+    // Built AFTER the choice, not before: it forks git twice and reads the tail
+    // of a transcript, which is work nobody asked for while a menu is on screen.
+    let turns = taimux_core::env::var("TAIMUX_HANDOFF_TURNS")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(taimux_core::handoff::DEFAULT_TURNS);
+    let prompt = taimux_core::handoff::build(&agent, &key, turns);
+    let cmd = match taimux_core::handoff::launch(target, &prompt) {
+        Ok(c) => c,
+        Err(why) => {
+            println!("\r\n\r\n  {}.\r\n", why);
+            any_key();
+            return;
+        }
+    };
+    // The same refusal Enter makes, and for the same reason: an agent started in
+    // the wrong directory works on a different project, silently.
+    let cwd = if std::path::Path::new(&meta.cwd).is_dir() {
+        meta.cwd.clone()
+    } else {
+        clear(&mut out);
+        println!(
+            "\x1b[1mtaimux: {} is gone\x1b[0m\n",
+            if meta.cwd.is_empty() {
+                "its directory"
+            } else {
+                &meta.cwd
+            }
+        );
+        println!("  A handoff starts an agent in the directory the conversation ran");
+        println!("  in, and that one is no longer there.\n");
+        any_key();
+        return;
+    };
+
+    if taimux_core::tmux::run(&["new-window", "-c", &cwd, &cmd]) {
+        return; // the new window is the feedback
+    }
+    clear(&mut out);
+    println!("\x1b[1mtaimux: tmux would not open a window\x1b[0m\n");
+    any_key();
+}
+
 #[cfg(test)]
 mod tests {
 

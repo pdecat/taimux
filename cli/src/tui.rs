@@ -432,7 +432,7 @@ fn header(script: bool, ended: bool, search_key: bool, search_on: bool) -> Strin
         // "outdated" and not "stale", which it said until the list of those rows
         // got a Tab stop of its own: two words for one thing on the same screen
         // reads as two different things.
-        h.push_str("   ctrl-x: restart   f8: restart all outdated");
+        h.push_str("   ctrl-x: restart   ctrl-o: hand off   f8: restart all outdated");
     }
     h
 }
@@ -1743,6 +1743,26 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
                             // holds nothing, so without this the cursor would
                             // still fall to the top on exactly the presses that
                             // did nothing.
+                            app.focus(&id);
+                        }
+                    }
+                    // ctrl-o: carry this conversation into a different agent.
+                    // Same shape as ctrl-x, and for the same reason: it draws a
+                    // menu, waits on a key and then opens a window, none of
+                    // which the picker's own loop can do while it is drawing.
+                    KeyCode::Char('o') if ctrl => {
+                        if let (Some(s), Some(r)) = (app.src.script.clone(), app.selected()) {
+                            let id = r.pane_id.clone();
+                            guard.suspend();
+                            if let Err(e) = act_child(&s, &["_handoff", &id]) {
+                                crate::act::report_failed_child("the handoff", &e);
+                            }
+                            guard.resume();
+                            repaint(&mut term);
+                            // Nothing in the list changed: a handoff opens a NEW
+                            // window and leaves the conversation it came from
+                            // exactly where it was. So the cursor goes straight
+                            // back on the row rather than the list being rebuilt.
                             app.focus(&id);
                         }
                     }

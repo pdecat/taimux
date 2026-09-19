@@ -148,6 +148,74 @@ fn resurrect_main(file: &str, dry: bool, verbose: bool) -> i32 {
     0
 }
 
+/// `taimux handoff`: the picker's ctrl-o without the picker.
+///
+/// With no `--to` it prints the prompt, which is the only other useful answer
+/// and the one a pipeline wants. With `--to <agent>` it opens a window running
+/// that agent on it, and `--print` alongside shows the command line instead of
+/// running it.
+fn handoff_main(a: &[String]) -> i32 {
+    let flag = |n: &str| -> Option<String> {
+        a.iter()
+            .position(|x| x == n)
+            .and_then(|i| a.get(i + 1))
+            .cloned()
+    };
+    let Some(id) = a.first().filter(|x| !x.starts_with('-')) else {
+        eprintln!("taimux handoff: which conversation? (see `taimux dead-rows`)");
+        return 1;
+    };
+    let (agent, key) = match taimux_cli::act::conversation_of(id) {
+        Ok(v) => v,
+        Err(why) => {
+            eprintln!("taimux handoff: {}", why);
+            return 1;
+        }
+    };
+    let turns = flag("--turns")
+        .and_then(|v| v.parse().ok())
+        .or_else(|| taimux_core::env::var("TAIMUX_HANDOFF_TURNS").and_then(|v| v.parse().ok()))
+        .unwrap_or(taimux_core::handoff::DEFAULT_TURNS);
+    let prompt = taimux_core::handoff::build(&agent, &key, turns);
+
+    let Some(to) = flag("--to") else {
+        print!("{}", prompt);
+        return 0;
+    };
+    let cmd = match taimux_core::handoff::launch(&to, &prompt) {
+        Ok(c) => c,
+        Err(why) => {
+            eprintln!("taimux handoff: {}", why);
+            return 1;
+        }
+    };
+    if a.iter().any(|x| x == "--print") {
+        println!("{}", cmd);
+        return 0;
+    }
+    // The same refusal Enter makes, and for the same reason: an agent started in
+    // the wrong directory works on a different project, silently.
+    let cwd = taimux_core::agents::meta(&agent, &key).cwd;
+    if !std::path::Path::new(&cwd).is_dir() {
+        eprintln!(
+            "taimux handoff: {} is gone, so there is nowhere to start {}",
+            if cwd.is_empty() {
+                "its directory"
+            } else {
+                &cwd
+            },
+            to
+        );
+        return 1;
+    }
+    if taimux_core::tmux::run(&["new-window", "-c", &cwd, &cmd]) {
+        0
+    } else {
+        eprintln!("taimux handoff: tmux would not open a window");
+        1
+    }
+}
+
 /// Build the plan, print it, and carry it out if asked.
 ///
 /// The confirmation is only offered where there is a terminal to ask on: from
@@ -1037,6 +1105,19 @@ fn main() {
             taimux_cli::act::sweep(&self_exe());
             0
         }
+        "_handoff" => {
+            taimux_cli::act::handoff_one(&std::env::args().nth(2).unwrap_or_default());
+            0
+        }
+        // The handoff without the picker: what ctrl-o builds, for a script, and
+        // for seeing what a target would actually be started with.
+        //
+        //   taimux handoff <row id> --print
+        //   taimux handoff <row id> --to codex
+        //
+        // A row id is `dead:<agent>:<key>` (what `dead-rows` prints) or a local
+        // claude pane id.
+        "handoff" => handoff_main(&std::env::args().skip(2).collect::<Vec<_>>()),
         // The second half of a resize, run detached by the picker it replaces.
         "_repopup" => {
             let a: Vec<String> = std::env::args().skip(2).collect();
@@ -1239,6 +1320,7 @@ fn help() -> String {
          switch <id>     jump to a pane id, local or <host>:<pane>\n\
          list            the agent sessions here, tab-separated\n\
          preview <id>    what a session's pane, or transcript, is showing\n\
+         handoff <id>    carry a conversation into a different agent\n\
          \n\
          print-cmds      which conversation each claude pane is on\n\
          restart [-n]    restart idle claude panes on their own conversation\n\

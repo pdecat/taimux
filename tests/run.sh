@@ -687,6 +687,29 @@ sed -i "s|\t/w/gem\t|\t/tmp/muxhop-gem\t|" "$SF"
 OUT="$(sw "dead:gemini:$GS")"
 has "gemini resumes by the id in its header" "$OUT" "command gemini --resume g1"
 
+# ============================================================================
+section "past: the handoff, which is the other thing to do with a conversation"
+# ============================================================================
+HO="$("$XBIN" handoff "dead:agy:$AS")"
+has "it leads with the instruction"   "$HO" "Continue this work."
+has "…naming the tool it came from"   "$HO" "an Antigravity session"
+has "…and the directory to work in"   "$HO" "Work in: /tmp/muxhop-agy"
+has "the task is what it was asked"   "$HO" "the agy question"
+has "both sides of the conversation are carried" "$HO" "User: the agy question"
+has "…including what the agent said"  "$HO" "Antigravity: the agy answer"
+has "…and a pointer to the whole transcript" "$HO" "Full session transcript: $AS"
+
+# Every target takes its prompt differently, and two of them would otherwise run
+# it non-interactively, which is the opposite of what a handoff is for.
+has "claude takes a bare argument" \
+    "$("$XBIN" handoff "dead:agy:$AS" --to claude --print)" "command claude 'Continue this work."
+has "opencode is started interactively, not with \`run\`" \
+    "$("$XBIN" handoff "dead:agy:$AS" --to opencode --print)" "command opencode --prompt "
+has "agy takes -i, which is its interactive prompt" \
+    "$("$XBIN" handoff "dead:agy:$AS" --to agy --print)" "command agy -i "
+r=0; out="$("$XBIN" handoff "dead:agy:$AS" --to nosuchtool --print 2>&1)" || r=1
+eq "a target taimux cannot start is a refusal" "1" "$r"
+
 export TAIMUX_SEARCH=0
 unset -f _claude_dir
 export HOME="$REALHOME"

@@ -67,6 +67,7 @@ ones. Same pane scan, same reading of what each session is doing. See
 - [Searching what a session said](#searching-what-a-session-said)
 - [Sessions running outdated code](#sessions-running-outdated-code)
 - [Past sessions](#past-sessions)
+- [Carrying a conversation into another agent](#carrying-a-conversation-into-another-agent)
 - [Sessions on other hosts](#sessions-on-other-hosts)
 - [Putting a Claude Code session back](#putting-a-claude-code-session-back)
   - [`taimux restart`](#taimux-restart)
@@ -470,6 +471,7 @@ Inside the picker:
 | `Ctrl-r`       | refresh the list now            |
 | `Ctrl-/`       | toggle the preview              |
 | `Ctrl-x`       | restart the highlighted claude session onto the installed version |
+| `Ctrl-o`       | [carry this conversation into a different agent](#carrying-a-conversation-into-another-agent) |
 | `F8`           | restart every [outdated](#sessions-running-outdated-code) claude session, after showing the plan and asking |
 | `Ctrl-w`       | delete the last word of the query (`Alt-Backspace` too) |
 | `Ctrl-h`       | delete a character, as `Backspace` does |
@@ -864,7 +866,7 @@ in it worth knowing:
   either. Its own `state_<n>.sqlite` index is not used: everything the list needs
   is in the rollout, so this keeps working when that database changes shape.
 - **OpenCode is a database**, which changes three things: the key is a session id
-  rather than a path, there is no transcript to hand anyone, and its
+  rather than a path, there is no transcript to point a handoff at, and its
   fingerprint is a timestamp rather than a byte count. It is read through
   [turso](https://github.com/tursodatabase/turso), a pure-Rust SQLite, so
   `cargo build` still needs no C toolchain and the release is still one static
@@ -953,6 +955,78 @@ that came from measuring rather than guessing:
 | `TAIMUX_SESSIONS_MAX` | `0` | a cap on how many conversations are tracked, newest first; `0` is none |
 | `TAIMUX_DEAD_TURNS` | `6` | turns of the conversation the preview shows |
 | `TAIMUX_INDEX_THREADS` | half the machine, at most 4 | threads a pass reads with |
+
+## Carrying a conversation into another agent
+
+The list above answers "where did that session get to". **`Ctrl-o`** answers the
+question that usually comes next: continue it somewhere else. A Codex session you
+want Claude to finish; a Claude session whose directory you want Gemini to look
+at. It is the thing rses existed for, and the reason a conversation is worth
+finding in the first place is often that you want a different tool on it.
+
+It opens a new window running the target agent with one prompt already typed:
+
+```
+Continue this work. You are picking up from a Claude Code session.
+Work in: /home/you/workspaces/billing
+Branch: main
+
+Task:
+  billing: reconcile the ledger
+
+Recent commits:
+  8f2c1ad fix: the rounding on partial refunds
+  …
+
+Uncommitted changes:
+   M src/ledger.rs
+
+Recent conversation (6 messages):
+  User: the totals are off by a cent on refunds
+  Claude Code: That is the rounding in `apply_refund`. …
+
+Full session transcript: /home/you/.claude/projects/…/8c1f….jsonl
+Read this file if you need the complete conversation history.
+```
+
+Four things, in the order a model reads them: **the instruction** first, because
+that is what it acts on; **the task**; **the git state**, which is the ground
+truth of what was actually done and the half a conversation is worst at reporting
+honestly; and **the last turns**, yours and its. Then a pointer to the
+transcript, which is why the turn budget can stay small: the prompt is an
+orientation, not an archive. (OpenCode keeps its conversation in a database and
+so has no file to point at; everything it hands over is in the prompt.)
+
+`Ctrl-o` works on a **past** row and on a **live claude pane**, which is the
+other half of it: handing off what you are in the middle of is the common case,
+and taimux can resolve a live claude pane to its transcript by the same ladder
+[restart](#taimux-restart) uses. A live pane running any other agent refuses and
+says why, on the rule above.
+
+The menu offers only the agents actually on your `PATH`, and never the one the
+conversation came from: continuing in the tool that already has it is **Enter**,
+which resumes it rather than starting a fresh session carrying a summary of
+itself.
+
+Each target is started the way that tool takes a prompt interactively, which is
+not always the obvious flag: `opencode --prompt` rather than `opencode run`, and
+`agy -i` rather than `agy --prompt`, both of which would otherwise answer once
+and exit.
+
+The same thing without the picker:
+
+```sh
+taimux handoff <row id>                  # print the prompt
+taimux handoff <row id> --to codex       # open a window running codex on it
+taimux handoff <row id> --to codex --print   # …show the command line instead
+```
+
+A row id is what `taimux dead-rows` prints (`dead:<agent>:<key>`), or a local
+claude pane id.
+
+| variable | default | |
+|---|---|---|
+| `TAIMUX_HANDOFF_TURNS` | `6` | turns of the conversation the prompt carries |
 
 ## Sessions on other hosts
 
@@ -1483,15 +1557,17 @@ because the conversations are just files on disk, taimux can
 [list the ones that have ended](#past-sessions), not only the ones still
 running.
 
-[`rses`](https://github.com/yazcaleb/rses) asked the other half of the question,
-and [past sessions](#past-sessions) is its idea: browse every tool's
-conversations in one list, whether or not anything is running them. It has no
-tmux in it at all, which is exactly why the two fit together rather than
-competing: it was the answer to "which conversation was that", and this is that
-answer inside the picker you already open. What came across is the tail-read
-preview and the observation that a harness's injected blocks will otherwise flood
-a search index. What did not is its Node runtime, and its cap-free listing is now
-the default here rather than the exception.
+[`rses`](https://github.com/yazcaleb/rses) asked the other half of the question, and
+[past sessions](#past-sessions) and
+[the handoff](#carrying-a-conversation-into-another-agent) are its ideas: browse
+every tool's conversations in one list, whether or not anything is running them,
+and continue one in a different tool. It has no tmux in it at all, which is
+exactly why the two fit together rather than competing: it was the answer to
+"which conversation was that", and this is that answer inside the picker you
+already open. What came across is the shape of the handoff prompt, the tail-read
+preview, and the observation that a harness's injected blocks will otherwise
+flood a search index. What did not is its Node runtime, and its cap-free listing
+is now the default here rather than the exception.
 
 Smaller neighbours worth knowing:
 [`tmux-agent`](https://github.com/trentdavies/tmux-agent) (`ta`, Rust, embedded

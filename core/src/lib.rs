@@ -10,6 +10,7 @@
 pub mod agents;
 pub mod conv;
 pub mod env;
+pub mod handoff;
 pub mod hook;
 pub mod index;
 pub mod json;
