@@ -10,17 +10,23 @@
 //!
 //! ```text
 //! index/<pane id with everything awkward flattened>
-//!   idx <bytes of the transcript already indexed> <epoch> <pane id> <transcript>
+//!   idx <fingerprint of what has been indexed> <epoch> <pane id> <key>
 //!   <the blob, one line, no tabs>
 //!
 //! sessions
-//!   sess <epoch>
-//!   <mtime> <pane|-> <transcript> <cwd> <version> <title> <t|p>
+//!   sess <epoch> 2
+//!   <mtime> <pane|-> <agent> <key> <cwd> <version> <title> <t|p>
 //! ```
 //!
 //! One index file per PANE, not per transcript: the pane is what the list is
 //! keyed by, and a `/clear` moving a pane onto a new conversation is then just a
 //! header naming a transcript that is no longer this pane's.
+//!
+//! The `2` on the sessions header is a format version, and the only thing that
+//! reads it is the check that refuses an older file. There is nothing to migrate:
+//! this cache lives in `XDG_RUNTIME_DIR`, dies with the boot, and is rewritten
+//! whole on every pass, so a version taimux does not recognise is one pass of
+//! staleness rather than a problem.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -219,39 +225,83 @@ pub fn preview_match(pane: &str, q: &Query, want: usize) -> Vec<String> {
 /// One row of the sessions cache.
 pub struct Session {
     pub mtime: i64,
-    /// `-` when no pane is on this conversation, i.e. when it has ended.
+    /// `-` when no pane is on this conversation. Only ever a pane id for claude,
+    /// which is the one agent that publishes which conversation a pane is on.
     pub pane: String,
-    pub path: String,
+    /// Which tool wrote it.
+    pub agent: String,
+    /// What that tool calls it: a transcript path, or a session id for a store
+    /// that keeps its conversations in a database.
+    pub key: String,
     pub cwd: String,
     pub version: String,
     pub title: String,
-    /// `t` for a title the session recorded, `p` for the last prompt standing in
-    /// for one.
+    /// `t` for a title the session recorded, `p` for a prompt standing in for
+    /// one.
     pub src: String,
+}
+
+/// The version of the cache format this build writes and will read.
+const FORMAT: &str = "2";
+
+/// The header a sessions cache opens with.
+pub fn header(now: i64) -> String {
+    format!("sess {} {}\n", now, FORMAT)
 }
 
 pub fn sessions() -> Vec<Session> {
     let Ok(text) = std::fs::read_to_string(sessions_file()) else {
         return Vec::new();
     };
-    text.lines()
-        .skip(1) // the `sess <epoch>` header
+    let mut lines = text.lines();
+    // A cache written by another version is skipped rather than misread: its
+    // fields are in different places, and this one is rewritten within a pass.
+    match lines.next().and_then(|h| h.split(' ').nth(2)) {
+        Some(FORMAT) => {}
+        _ => return Vec::new(),
+    }
+    lines
         .filter_map(|l| {
             let f: Vec<&str> = l.split('\t').collect();
-            if f.len() < 7 {
+            if f.len() < 8 {
                 return None;
             }
             Some(Session {
                 mtime: f[0].parse().unwrap_or(0),
                 pane: f[1].to_string(),
-                path: f[2].to_string(),
-                cwd: f[3].to_string(),
-                version: f[4].to_string(),
-                title: f[5].to_string(),
-                src: f[6].to_string(),
+                agent: f[2].to_string(),
+                key: f[3].to_string(),
+                cwd: f[4].to_string(),
+                version: f[5].to_string(),
+                title: f[6].to_string(),
+                src: f[7].to_string(),
             })
         })
         .collect()
+}
+
+/// The picker's id for a past conversation: `dead:<agent>:<key>`.
+///
+/// A past session has no pane, so the row needs a name of its own, and that name
+/// has to carry the agent as well as the key: the key alone says which
+/// conversation but not which tool knows how to open it, and two agents can key
+/// by a path.
+///
+/// The `dead:` prefix is unchanged from when this list was claude-only, and it
+/// stays: it is what every caller matches on, it appears in the golden layout
+/// fixture, and renaming it would be a wire change bought with nothing.
+pub fn past_id(agent: &str, key: &str) -> String {
+    format!("dead:{}:{}", agent, key)
+}
+
+/// The agent and key back out of a row id, or None where it is not one.
+///
+/// The key can itself contain colons (a path can), so this splits ONCE: the
+/// agent is the first segment and everything after it is the key.
+pub fn split_past_id(id: &str) -> Option<(&str, &str)> {
+    let rest = id.strip_prefix("dead:")?;
+    let (agent, key) = rest.split_once(':')?;
+    (!agent.is_empty() && !key.is_empty()).then_some((agent, key))
 }
 
 /// How long ago, in one column's worth: minutes under the hour, hours under two
@@ -270,11 +320,15 @@ pub fn age(then: i64, now: i64) -> String {
     }
 }
 
-/// The ended-sessions list, in the same eight fields a pane row has so the layout
+/// The past-sessions list, in the same eight fields a pane row has so the layout
 /// does not have to know the difference.
 ///
-/// A pane id of `dead:<transcript>` rather than `%<n>`: an ended session has no
-/// pane, and the transcript is the only name it has.
+/// **A claude session open in a pane is left out**, since it is right there in
+/// every other list; one belonging to any other agent is not, because taimux
+/// cannot tell. Which conversation a pane is on is something the agent has to
+/// publish, and claude is the only one that does. That asymmetry is the whole
+/// reason this list is "past sessions" rather than "ended" ones: it is the
+/// history, and a conversation you happen to be in is still part of it.
 pub fn dead_rows(now: i64) -> String {
     if !sessions_file().is_file() {
         // The indexer runs behind the picker, so the first time this mode is
@@ -285,7 +339,7 @@ pub fn dead_rows(now: i64) -> String {
     let mut s = String::new();
     for e in sessions() {
         if e.pane != "-" {
-            continue; // still open in a pane: not ended
+            continue; // still open in a pane, and on every other list already
         }
         let title = if e.title.is_empty() {
             "(no title)"
@@ -294,10 +348,11 @@ pub fn dead_rows(now: i64) -> String {
         };
         let cwd = if e.cwd.is_empty() { "?" } else { &e.cwd };
         s.push_str(&format!(
-            "dead:{}\t{}\t{}\tclaude\t{}\tdead\t-\t{}\n",
-            e.path,
+            "{}\t{}\t{}\t{}\t{}\tdead\t-\t{}\n",
+            past_id(&e.agent, &e.key),
             age(e.mtime, now),
             cwd,
+            e.agent,
             e.version,
             title
         ));

@@ -279,7 +279,7 @@ fn restart_main(o: &taimux_cli::restart::Opts, go: bool, ask: bool) -> i32 {
     }
 }
 
-/// Move the attached client to a row: a local pane, an ended conversation, or a
+/// Move the attached client to a row: a local pane, a past conversation, or a
 /// session on another host.
 fn switch(id: &str) -> i32 {
     let id = id.to_string();
@@ -287,13 +287,9 @@ fn switch(id: &str) -> i32 {
         1 // nothing to switch to, and nothing said: same as bash
     } else if id == "dead:!" {
         0 // the "still building" note row: nothing to switch to
-    } else if let Some(tr) = id.strip_prefix("dead:") {
-        let cwd = taimux_core::index::sessions()
-            .into_iter()
-            .find(|e| e.path == tr)
-            .map(|e| e.cwd)
-            .unwrap_or_default();
-        match taimux_core::tmux::resume_dead(tr, &cwd) {
+    } else if let Some((agent, key)) = taimux_core::index::split_past_id(&id) {
+        let cwd = taimux_core::tmux::past_cwd(agent, key);
+        match taimux_core::tmux::resume_dead(agent, key, &cwd) {
             Ok(()) => 0,
             Err(why) => {
                 eprintln!("taimux: {}", why);
@@ -768,9 +764,18 @@ fn main() {
         // affordable, so it is worth being able to assert on one file.
         "session-meta" => match std::env::args().nth(2) {
             Some(path) => {
-                let (cwd, ver, ttl, src) =
-                    taimux_daemon::indexer::session_meta(std::path::Path::new(&path));
-                println!("{}\t{}\t{}\t{}", cwd, ver, ttl, src);
+                // The agent is a flag rather than guessed from the path, and it
+                // defaults to claude, which is what this entry point was for
+                // before there were four others.
+                let a: Vec<String> = std::env::args().skip(2).collect();
+                let agent = a
+                    .iter()
+                    .position(|x| x == "--agent")
+                    .and_then(|i| a.get(i + 1))
+                    .cloned()
+                    .unwrap_or_else(|| "claude".into());
+                let m = taimux_core::agents::meta(&agent, &path);
+                println!("{}\t{}\t{}\t{}", m.cwd, m.version, m.title, m.src);
                 0
             }
             None => {
@@ -951,8 +956,8 @@ fn main() {
             let q = std::env::args().nth(3).unwrap_or_default();
             if id.is_empty() {
                 0
-            } else if let Some(tr) = id.strip_prefix("dead:") {
-                print!("{}", taimux_core::tmux::preview_dead(tr, &q));
+            } else if id.starts_with("dead:") {
+                print!("{}", taimux_core::tmux::preview_dead(&id, &q));
                 0
             } else if id.starts_with('%') {
                 print!("{}", taimux_core::tmux::preview_live(&id, &q));
@@ -1239,7 +1244,7 @@ fn help() -> String {
          restart [-n]    restart idle claude panes on their own conversation\n\
          resurrect       rewrite a tmux-resurrect save to resume conversations\n\
          \n\
-         index [--force] one indexing pass: transcripts, sessions, ended rows\n\
+         index [--force] one indexing pass: transcripts, sessions, past rows\n\
          hook            a session reporting its own turn boundary\n\
          serve           the collection daemon (socket: {})\n\
          \n\

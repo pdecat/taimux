@@ -84,30 +84,46 @@ pub fn switch_local(pane: &str, zoom: bool) -> bool {
     run(&["switch-client", "-t", &sess])
 }
 
-/// Open an ended conversation again, in the directory it ran in.
+/// Open a past conversation again, in its own tool, in the directory it ran in.
 ///
 /// **Through `command`**, so no shell alias fires and tmux-resurrect can read the
 /// pane's argv back later. And it refuses when the directory has gone rather than
 /// falling back to `$HOME`: a session resumed in the wrong place writes its
 /// history into a different project, silently.
-pub fn resume_dead(transcript: &str, cwd: &str) -> Result<(), String> {
-    if !std::path::Path::new(transcript).is_file() {
+///
+/// Each agent supplies its own command, and one of them supplies a refusal
+/// instead: Gemini's CLI cannot be told which session to resume. That refusal is
+/// carried through to the keypress rather than swallowed, because a key that
+/// looks like it did nothing is the worst outcome available here.
+pub fn resume_dead(agent: &str, key: &str, cwd: &str) -> Result<(), String> {
+    // A file-backed session has to still be on disk; a database-backed one has
+    // no file to check and its store answered a moment ago.
+    if key.starts_with('/') && !std::path::Path::new(key).is_file() {
         return Err("that conversation is no longer on disk".into());
     }
+    let cmd = crate::agents::resume(agent, key)?;
     if cwd.is_empty() || !std::path::Path::new(cwd).is_dir() {
         return Err(format!(
             "{} is gone, so there is nowhere to resume it",
             if cwd.is_empty() { "its directory" } else { cwd }
         ));
     }
-    // tmux hands this string to a shell, so the path is quoted for it. One
-    // argument, quoted once, rather than a command line assembled by two layers.
-    let cmd = format!("command claude --resume {}", shell_quote(transcript));
+    // tmux hands this string to a shell, and everything variable in it was
+    // quoted once, by the agent that built it.
     if run(&["new-window", "-c", cwd, &cmd]) {
         Ok(())
     } else {
         Err("tmux would not open a window".into())
     }
+}
+
+/// The directory a past conversation ran in, off the sessions cache.
+pub fn past_cwd(agent: &str, key: &str) -> String {
+    crate::index::sessions()
+        .into_iter()
+        .find(|e| e.agent == agent && e.key == key)
+        .map(|e| e.cwd)
+        .unwrap_or_default()
 }
 
 /// Single-quote a string for the shell tmux will hand it to, the way bash's
@@ -185,50 +201,62 @@ fn preview_want() -> usize {
         .unwrap_or(4)
 }
 
-/// An ENDED conversation has no screen to capture: what it has is the last things
+/// A PAST conversation has no screen to capture: what it has is the last things
 /// that were said in it, which is what tells you whether it is the one you were
 /// looking for.
-pub fn preview_dead(transcript: &str, query: &str) -> String {
-    let mut s = match_block(&format!("dead:{}", transcript), query, preview_want());
-    if transcript == "!" {
+pub fn preview_dead(id: &str, query: &str) -> String {
+    let mut s = match_block(id, query, preview_want());
+    if id == "dead:!" {
         s.push_str("\x1b[90mthe list is still being built\x1b[0m\n");
         return s;
     }
+    let Some((agent, key)) = crate::index::split_past_id(id) else {
+        s.push_str("\x1b[31mthat row does not name a conversation\x1b[0m\n");
+        return s;
+    };
     let meta = crate::index::sessions()
         .into_iter()
-        .find(|e| e.path == transcript);
+        .find(|e| e.agent == agent && e.key == key);
     let cwd = meta.as_ref().map(|m| m.cwd.clone()).unwrap_or_default();
     let ver = meta.as_ref().map(|m| m.version.clone()).unwrap_or_default();
     s.push_str(&format!(
         "\x1b[1;36m{}\x1b[0m  \x1b[2m{}\x1b[0m\n",
         if cwd.is_empty() { "?" } else { &cwd },
         if ver.is_empty() {
-            String::new()
+            agent.to_string()
         } else {
-            format!("claude {}", ver)
+            format!("{} {}", agent, ver)
         }
     ));
     s.push_str(&format!("\x1b[90m{}\x1b[0m\n\n", RULE));
 
-    let Ok(text) = std::fs::read_to_string(transcript) else {
-        s.push_str("\x1b[31mthis conversation is no longer on disk\x1b[0m\n");
-        return s;
-    };
     let want = env::var("TAIMUX_DEAD_TURNS")
         .and_then(|v| v.parse().ok())
         .unwrap_or(6);
-    let cols = env::var("TAIMUX_PREVIEW_COLUMNS")
+    let cols: usize = env::var("TAIMUX_PREVIEW_COLUMNS")
         .and_then(|v| v.parse().ok())
         .unwrap_or(100);
-    let turns = crate::transcript::last_turns(&text, want, cols);
+    let turns = crate::agents::turns(agent, key, want);
     if turns.is_empty() {
-        s.push_str("\x1b[90m(nothing was said in this one)\x1b[0m\n");
+        if key.starts_with('/') && !std::path::Path::new(key).is_file() {
+            s.push_str("\x1b[31mthis conversation is no longer on disk\x1b[0m\n");
+        } else {
+            s.push_str("\x1b[90m(nothing was said in this one)\x1b[0m\n");
+        }
     }
-    for (who, what) in turns {
+    // Two lines a turn is enough to recognise one, and the preview pane is
+    // short. A turn cut off says so rather than pretending it ended there.
+    let cap = (cols * 2).saturating_sub(2);
+    for t in turns {
+        let what = if t.text.chars().count() > cap {
+            format!("{}…", t.text.chars().take(cap).collect::<String>())
+        } else {
+            t.text
+        };
         s.push_str(&format!(
             "\x1b[{}m{}\x1b[0m {}\n\n",
-            if who == "you" { "1;36" } else { "2" },
-            if who == "you" { "❯" } else { " " },
+            if t.you { "1;36" } else { "2" },
+            if t.you { "❯" } else { " " },
             what
         ));
     }
@@ -288,7 +316,7 @@ mod tests {
 
     #[test]
     fn resuming_refuses_a_transcript_that_has_gone() {
-        let e = resume_dead("/nowhere/at/all.jsonl", "/tmp").expect_err("refused");
+        let e = resume_dead("claude", "/nowhere/at/all.jsonl", "/tmp").expect_err("refused");
         assert!(e.contains("no longer on disk"));
     }
 
@@ -299,10 +327,41 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         let tr = d.join("t.jsonl");
         std::fs::write(&tr, "").unwrap();
-        let e = resume_dead(&tr.to_string_lossy(), "/nowhere/at/all").expect_err("refused");
+        let e =
+            resume_dead("claude", &tr.to_string_lossy(), "/nowhere/at/all").expect_err("refused");
         assert!(e.contains("/nowhere/at/all"));
-        let e = resume_dead(&tr.to_string_lossy(), "").expect_err("refused");
+        let e = resume_dead("claude", &tr.to_string_lossy(), "").expect_err("refused");
         assert!(e.contains("its directory"));
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A conversation with nothing to resume BY refuses before the directory is
+    /// judged, because the refusal is about the conversation and saying "its
+    /// directory is gone" would send you looking in the wrong place.
+    #[test]
+    fn a_conversation_with_no_id_refuses_before_the_directory_is_judged() {
+        let d = std::env::temp_dir().join(format!("jmtxg{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        // An agy transcript with no conversation directory above it: there is no
+        // `--conversation` argument to be had.
+        let tr = d.join("transcript.jsonl");
+        std::fs::write(&tr, "").unwrap();
+        let e = resume_dead("agy", &tr.to_string_lossy(), "/nowhere/at/all").expect_err("refused");
+        assert!(e.contains("no id to resume by"), "{e}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A row id carries the agent AND the key, and the key can hold colons of
+    /// its own, so it splits once.
+    #[test]
+    fn a_past_row_id_round_trips() {
+        let id = crate::index::past_id("claude", "/a/b:c.jsonl");
+        assert_eq!(id, "dead:claude:/a/b:c.jsonl");
+        assert_eq!(
+            crate::index::split_past_id(&id),
+            Some(("claude", "/a/b:c.jsonl"))
+        );
+        assert_eq!(crate::index::split_past_id("%7"), None);
+        assert_eq!(crate::index::split_past_id("dead:!"), None);
     }
 }

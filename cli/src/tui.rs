@@ -100,7 +100,7 @@ impl Mode {
             Mode::Run => "working",
             Mode::Idle => "idle at the prompt",
             Mode::Outdated => "running outdated code",
-            Mode::Dead => "ended sessions",
+            Mode::Dead => "past sessions",
         }
     }
 
@@ -131,7 +131,7 @@ impl Mode {
     /// One step round: all, waiting, working, idle, outdated, ended, all.
     ///
     /// A stop with nothing that could ever be in it is left OUT of the cycle
-    /// rather than reached and found empty: no cache of ended sessions, no ended
+    /// rather than reached and found empty: no cache of past sessions, no past
     /// stop, and nothing installed to compare a version against, no outdated
     /// stop. An empty list you can still land on is one you have to press Tab
     /// past every time round.
@@ -170,7 +170,7 @@ pub struct Source {
     /// The ended list stays synchronous: it is a read of one cache file, with no
     /// fork in it, and it is what Tab's last stop shows the instant you land on
     /// it. Nothing here has ever been slow, and making it async would mean
-    /// showing pane rows under the "ended sessions" label while it arrived.
+    /// showing pane rows under the "past sessions" label while it arrived.
     pub ended: Option<Box<dyn Fn() -> String>>,
     pub cur: String,
     pub home: String,
@@ -493,7 +493,7 @@ fn empty_note(
         lines.push(format!("Nothing matches {}", query));
         lines.push("ctrl-u clears it.".into());
     } else if mode == Mode::Dead {
-        lines.push("No conversations have ended here yet.".into());
+        lines.push("No past conversations have been found here yet.".into());
         lines.push("They are remembered as sessions come and go.".into());
     } else if nothing_scanned {
         lines.push("No agent sessions on this machine.".into());
@@ -684,38 +684,52 @@ impl App {
         )));
         out.push(Line::from(""));
 
-        // An ended conversation has no screen to capture: what it has is the
+        // A past conversation has no screen to capture: what it has is the
         // last things that were said in it.
-        if let Some(path) = id.strip_prefix("dead:") {
-            if path == "!" {
+        if id.starts_with("dead:") {
+            if id == "dead:!" {
                 body.push(Line::from(Span::styled(
                     "the list is still being built",
                     Style::default().fg(Color::DarkGray),
                 )));
                 return (out, body, false);
             }
-            let Ok(text) = std::fs::read_to_string(path) else {
+            let Some((agent, key)) = taimux_core::index::split_past_id(&id) else {
+                body.push(Line::from(Span::styled(
+                    "that row does not name a conversation",
+                    Style::default().fg(Color::Red),
+                )));
+                return (out, body, false);
+            };
+            // A conversation kept in a database has no file to be missing, and
+            // its store answered when the list was built.
+            if key.starts_with('/') && !std::path::Path::new(key).is_file() {
                 body.push(Line::from(Span::styled(
                     "this conversation is no longer on disk",
                     Style::default().fg(Color::Red),
                 )));
                 return (out, body, false);
-            };
-            let turns = taimux_core::transcript::last_turns(
-                &text,
-                env::var("TAIMUX_DEAD_TURNS")
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(6),
-                self.width.max(20),
-            );
+            }
+            let want = env::var("TAIMUX_DEAD_TURNS")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(6);
+            let turns = taimux_core::agents::turns(agent, key, want);
             if turns.is_empty() {
                 body.push(Line::from(Span::styled(
                     "(nothing was said in this one)",
                     Style::default().fg(Color::DarkGray),
                 )));
             }
-            for (who, what) in turns {
-                let (mark, st) = if who == "you" {
+            for t in turns {
+                // Two lines a turn is enough to recognise one, and the preview
+                // pane is short.
+                let cap = self.width.max(20) * 2;
+                let what = if t.text.chars().count() > cap {
+                    format!("{}…", t.text.chars().take(cap).collect::<String>())
+                } else {
+                    t.text
+                };
+                let (mark, st) = if t.you {
                     (
                         "❯ ",
                         Style::default()
@@ -2184,7 +2198,7 @@ mod tests {
         // the ended list, before anything has ended
         let dead = text(empty_note(Mode::Dead, "", false, false, true));
         assert!(
-            dead.contains("No conversations have ended here yet"),
+            dead.contains("No past conversations have been found here yet"),
             "{dead}"
         );
 
@@ -2371,7 +2385,7 @@ mod tests {
         );
         assert_eq!(
             label(Mode::Dead, true, true, false),
-            " ended sessions · live · ⌕ "
+            " past sessions · live · ⌕ "
         );
     }
 

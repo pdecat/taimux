@@ -41,12 +41,12 @@
 //!   since their own fetch is what maintains them.
 
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Seek, SeekFrom, Write};
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use taimux_core::{conv, index, transcript};
+use taimux_core::{conv, index};
 
 /// The one thing here that is not std. `flock` is in libc, which is already
 /// linked; declaring the three symbols needed is smaller and more honest than
@@ -165,15 +165,9 @@ struct Head {
 fn read_head(f: &Path) -> Option<(Head, String)> {
     let text = std::fs::read_to_string(f).ok()?;
     let mut lines = text.splitn(2, '\n');
-    let head: Vec<&str> = lines.next()?.split(' ').collect();
-    if head.first() != Some(&"idx") || head.len() < 5 {
-        return None;
-    }
+    let head = parse_head(lines.next()?)?;
     Some((
-        Head {
-            seen: head[1].parse().ok()?,
-            path: head[4..].join(" "),
-        },
+        head,
         lines
             .next()
             .unwrap_or("")
@@ -182,61 +176,88 @@ fn read_head(f: &Path) -> Option<(Head, String)> {
     ))
 }
 
-/// One pane's transcript, indexed. Returns false when there was nothing to do.
+/// The header alone, without pulling the blob under it into memory.
+///
+/// One index file can hold a quarter of a megabyte of prose, and a pass that
+/// only wants to know whether a conversation has changed reads 820 of them.
+fn read_head_line(f: &Path) -> Option<Head> {
+    use std::io::BufRead;
+    let fh = std::fs::File::open(f).ok()?;
+    let mut line = String::new();
+    std::io::BufReader::new(fh).read_line(&mut line).ok()?;
+    parse_head(line.trim_end_matches('\n'))
+}
+
+/// Anything that is not a well-formed header is a file being rewritten under us
+/// or left by an older version, and it is skipped rather than guessed at.
+fn parse_head(line: &str) -> Option<Head> {
+    let head: Vec<&str> = line.split(' ').collect();
+    if head.first() != Some(&"idx") || head.len() < 5 {
+        return None;
+    }
+    Some(Head {
+        seen: head[1].parse().ok()?,
+        // Last, and joined back, so a key with a space in it survives.
+        path: head[4..].join(" "),
+    })
+}
+
+/// One pane's live claude transcript, indexed. False when there was nothing to
+/// do.
 pub fn index_pane(id: &str, tr: &Path) -> bool {
-    let Ok(meta) = std::fs::metadata(tr) else {
-        return false;
-    };
-    let size = meta.len();
+    index_one(id, "claude", &tr.to_string_lossy())
+}
+
+/// One conversation's prose, indexed, whoever wrote it and wherever it is kept.
+///
+/// The incremental half is the agent's business now (`agents::prose`): a file
+/// reports how many bytes it had and hands back only what it gained, a database
+/// reports when its row was last touched and hands back the whole thing. Either
+/// way what arrives here is a fingerprint, some text, and whether that text
+/// replaces the blob or extends it.
+pub fn index_one(id: &str, agent: &str, key: &str) -> bool {
     let f = index::index_dir().join(index::key_for(id));
 
-    let mut known = String::new();
-    let mut from = 0u64;
-    if let Some((head, blob)) = read_head(&f) {
-        if head.path == tr.to_string_lossy() && head.seen > 0 {
-            if head.seen == size {
-                return false; // nothing new to read
-            }
-            // Grown: read only the bytes it gained. SHRUNK: not the same file any
-            // more whatever its name says, so the blob is rebuilt.
-            if head.seen < size {
-                known = blob;
-                from = head.seen;
-            }
-        }
+    // The cheap question first, and it is the whole performance story of a pass:
+    // asking the store for a fingerprint is a `stat` or an indexed lookup, while
+    // finding out by reading is a gigabyte across the history. Only the header
+    // line is read for the same reason; the blob below it can be a quarter of a
+    // megabyte and is wanted only when there is something to append to it.
+    let head = read_head_line(&f);
+    let from = match &head {
+        Some(h) if h.path == key => h.seen,
+        _ => 0,
+    };
+    if from > 0 && taimux_core::agents::fingerprint(agent, key) == Some(from) {
+        return false; // nothing has been said since the last pass
     }
 
-    let mut text = String::new();
-    if let Ok(mut fh) = File::open(tr) {
-        if from > 0 && fh.seek(SeekFrom::Start(from)).is_err() {
-            return false;
-        }
-        if fh.read_to_string(&mut text).is_err() {
-            // A transcript with a partial character at the seek point: rebuild
-            // rather than give up, since the next pass would hit it again.
-            let mut raw = Vec::new();
-            let Ok(mut fh) = File::open(tr) else {
-                return false;
-            };
-            if fh.read_to_end(&mut raw).is_err() {
-                return false;
-            }
-            text = String::from_utf8_lossy(&raw).into_owned();
-            known.clear();
-        }
-    }
+    let known = if from > 0 {
+        read_head(&f).map(|(_, blob)| blob).unwrap_or_default()
+    } else {
+        String::new()
+    };
 
-    let blob = cap(
-        &format!("{}{}", known, transcript::extract(&text)),
-        env_usize("TAIMUX_SEARCH_CAP", 262144),
-    );
+    let Some(p) = taimux_core::agents::prose(agent, key, from) else {
+        return false;
+    };
+    if p.fingerprint == from && from > 0 {
+        return false; // the store changed its mind between the two questions
+    }
+    let joined = if p.whole {
+        p.text
+    } else {
+        format!("{}{}", known, p.text)
+    };
+    let blob = cap(&joined, env_usize("TAIMUX_SEARCH_CAP", 262144));
+
     let _ = std::fs::create_dir_all(index::index_dir());
     // Written by rename: half a file is worse than an old one when two pickers
     // are reading while a pass writes.
     let tmp = f.with_extension(format!("t{}", std::process::id()));
     let ok = std::fs::write(
         &tmp,
-        format!("idx {} {} {} {}\n{}\n", size, now(), id, tr.display(), blob),
+        format!("idx {} {} {} {}\n{}\n", p.fingerprint, now(), id, key, blob),
     )
     .is_ok();
     if ok && std::fs::rename(&tmp, &f).is_ok() {
@@ -274,130 +295,35 @@ pub fn live_transcripts(rows: &str) -> Vec<(String, PathBuf)> {
     out
 }
 
-/// The cwd, the claude version and the title of one conversation, read BACKWARDS
-/// and stopped as soon as it has all three.
-///
-/// That is what makes listing hundreds of them affordable: all three are
-/// re-stated on recent records, so a 23 MB conversation costs no more than a
-/// small one.
-pub fn session_meta(path: &Path) -> (String, String, String, String) {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return (String::new(), String::new(), String::new(), String::new());
-    };
-    let (mut cwd, mut ver, mut ttl, mut ait, mut lp) = (
-        String::new(),
-        String::new(),
-        String::new(),
-        String::new(),
-        String::new(),
-    );
-    for (n, line) in text.lines().rev().enumerate() {
-        if cwd.is_empty() {
-            cwd = val(line, "cwd");
-        }
-        if ver.is_empty() {
-            ver = val(line, "version");
-        }
-        // The two kinds interleave for the whole life of a session, so the last
-        // one written is usually the unprefixed ai-title while the pane shows the
-        // custom one. Prefer the custom one and keep the other as a fallback.
-        if ttl.is_empty() && line.contains("\"type\":\"custom-title\"") {
-            ttl = val(line, "customTitle");
-        }
-        if ait.is_empty() && line.contains("\"type\":\"ai-title\"") {
-            ait = val(line, "aiTitle");
-        }
-        // A session can end before it was ever titled: a short one, or one that
-        // was cleared. The prompt it was last given identifies such a session far
-        // better than "(no title)": one of Patrick's turned out to be the tail of
-        // a pasted config file, which is exactly the session you would go looking
-        // for.
-        if lp.is_empty() && line.contains("\"type\":\"last-prompt\"") {
-            lp = val(line, "lastPrompt");
-        }
-        if !cwd.is_empty() && !ver.is_empty() && !ttl.is_empty() {
-            break;
-        }
-        if n > 400 {
-            break; // a transcript that never says: stop digging
-        }
-    }
-    if ttl.is_empty() {
-        ttl = ait;
-    }
-    let mut src = if ttl.is_empty() { "" } else { "t" }.to_string();
-    if ttl.is_empty() && !lp.is_empty() {
-        let mut t = lp
-            .replace("\\n", " ")
-            .replace("\\r", " ")
-            .replace("\\t", " ");
-        while t.contains("  ") {
-            t = t.replace("  ", " ");
-        }
-        t = t.trim_start_matches(' ').to_string();
-        ttl = if t.chars().count() > 80 {
-            format!("{}…", t.chars().take(79).collect::<String>())
-        } else {
-            t
-        };
-        src = "p".into();
-    }
-    let clean = |s: String| s.replace('\t', " ");
-    (clean(cwd), clean(ver), clean(ttl), src)
+/// A conversation's four cached fields, tab-separated, as the cache spells them.
+fn fields(m: &taimux_core::agents::Meta) -> String {
+    format!("{}\t{}\t{}\t{}", m.cwd, m.version, m.title, m.src)
 }
 
-/// One JSON string value, by key. Kept as a name of its own because this file
-/// reads it dozens of times and `val(line, "type")` says what it means here.
-fn val(line: &str, key: &str) -> String {
-    taimux_core::json::field(line, key)
-}
-
-/// Every conversation on disk, newest first, capped.
+/// Every conversation every agent has, newest first.
 ///
-/// The cap exists because the corpus only grows: Claude Code's own cleanup is set
-/// to ten years here, so this is hundreds of conversations today and thousands
-/// eventually, and both the list and the content index behind it have to stay
-/// bounded by something. Recency is the only sensible bound.
-fn transcripts_by_recency(limit: usize) -> Vec<(i64, PathBuf)> {
-    let mut out: Vec<(i64, PathBuf)> = Vec::new();
-    walk(&conv::claude_dir().join("projects"), &mut out);
-    out.sort_by_key(|(t, _)| std::cmp::Reverse(*t));
-    out.truncate(limit);
+/// **Uncapped.** There used to be a cap of 200 here, and the argument for it was
+/// that the corpus only grows: Claude Code's own cleanup is set to ten years on
+/// this machine, so it is hundreds of conversations today and thousands
+/// eventually. What the cap actually cost was the sessions you go looking for. A
+/// conversation from last month is the one you cannot find any other way, and it
+/// is also the first one a recency cap drops; with 572 transcripts here, two
+/// thirds of the history was invisible and nothing on the list said so.
+///
+/// What makes the uncapped version affordable is that the cost of a pass is the
+/// directory walk plus a read for each conversation that has said something since
+/// the last one, and a conversation nobody is in never says anything again. The
+/// walk itself is `stat` per file.
+///
+/// `TAIMUX_SESSIONS_MAX` still exists and still truncates, for a machine that
+/// wants the old behaviour. It defaults to 0, meaning no limit.
+fn past_by_recency(limit: usize) -> Vec<taimux_core::agents::Past> {
+    let mut out = taimux_core::agents::discover();
+    out.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.key.cmp(&b.key)));
+    if limit > 0 {
+        out.truncate(limit);
+    }
     out
-}
-
-/// Every `.jsonl` under a directory, at ANY depth, following symlinks.
-///
-/// The depth is the whole point, and getting it wrong was the one real bug in
-/// this port: a subagent writes to
-/// `projects/<proj>/<session>/subagents/agent-*.jsonl`, four levels down, and
-/// bash reaches those because its `find -L` has no maxdepth. Stopping at two
-/// levels missed them, and since the list is capped at 200 by RECENCY that
-/// changed which 200 came back, not merely how many: 44 of the cache's rows
-/// differed. (`_transcript_by_id` is a different question and IS bounded, at
-/// maxdepth 2, so a subagent transcript is not resolvable by id.)
-fn walk(dir: &Path, out: &mut Vec<(i64, PathBuf)>) {
-    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        let p = e.path();
-        // metadata() follows symlinks, which is what `find -L` does.
-        let Ok(m) = std::fs::metadata(&p) else {
-            continue;
-        };
-        if m.is_dir() {
-            walk(&p, out);
-            continue;
-        }
-        if p.extension().and_then(|x| x.to_str()) != Some("jsonl") {
-            continue;
-        }
-        let mtime = m
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-        out.push((mtime, p));
-    }
 }
 
 /// Rebuild the sessions cache.
@@ -413,6 +339,9 @@ pub fn sessions_scan(live: &[(String, PathBuf)]) {
     if let Some(d) = f.parent() {
         let _ = std::fs::create_dir_all(d);
     }
+    // Only claude appears here: it is the one agent that publishes which
+    // conversation a pane is on, so it is the one whose sessions can be told
+    // apart from the history.
     let onpane: std::collections::HashMap<String, String> = live
         .iter()
         .map(|(pane, p)| (p.to_string_lossy().into_owned(), pane.clone()))
@@ -421,26 +350,61 @@ pub fn sessions_scan(live: &[(String, PathBuf)]) {
     let mut known: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for e in index::sessions() {
         known.insert(
-            format!("{} {}", e.mtime, e.path),
+            format!("{} {} {}", e.mtime, e.agent, e.key),
             format!("{}\t{}\t{}\t{}", e.cwd, e.version, e.title, e.src),
         );
     }
 
-    let mut body = format!("sess {}\n", now());
-    for (mtime, path) in transcripts_by_recency(env_usize("TAIMUX_SESSIONS_MAX", 200)) {
-        let p = path.to_string_lossy().into_owned();
-        let meta = match known.get(&format!("{} {}", mtime, p)) {
-            Some(m) => m.clone(),
-            None => {
-                let (cwd, ver, ttl, src) = session_meta(&path);
-                format!("{}\t{}\t{}\t{}", cwd, ver, ttl, src)
-            }
-        };
+    let all = past_by_recency(env_usize("TAIMUX_SESSIONS_MAX", 0));
+
+    // Everything a conversation says about itself, resolved once. Three sources,
+    // cheapest first: the line the last pass wrote (a conversation untouched
+    // since then cannot have changed its mind), what the store handed over with
+    // the listing, and only failing both, a read of the conversation itself.
+    //
+    // Those reads are the whole cost of a cold pass, they are independent of one
+    // another, and they go on the same shared queue the content index uses: a
+    // slice each is the wrong split when one conversation can be a thousand
+    // times the size of its neighbour.
+    let lines: Vec<Option<String>> = all
+        .iter()
+        .map(|p| {
+            known
+                .get(&format!("{} {} {}", p.mtime, p.agent, p.key))
+                .cloned()
+                .or_else(|| p.meta.as_ref().map(fields))
+        })
+        .collect();
+    let lines: Vec<std::sync::Mutex<Option<String>>> =
+        lines.into_iter().map(std::sync::Mutex::new).collect();
+    let threads = env_usize("TAIMUX_INDEX_THREADS", default_threads()).max(1);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let (all_ref, lines_ref, next_ref) = (&all, &lines, &next);
+    std::thread::scope(|s| {
+        for _ in 0..threads {
+            s.spawn(move || loop {
+                let i = next_ref.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some(past) = all_ref.get(i) else { return };
+                if lines_ref[i].lock().map(|l| l.is_some()).unwrap_or(true) {
+                    continue;
+                }
+                let m = taimux_core::agents::meta(past.agent, &past.key);
+                if let Ok(mut slot) = lines_ref[i].lock() {
+                    *slot = Some(fields(&m));
+                }
+            });
+        }
+    });
+
+    let mut body = index::header(now());
+    for (past, line) in all.iter().zip(lines) {
+        let meta = line.into_inner().ok().flatten().unwrap_or_default();
         body.push_str(&format!(
-            "{}\t{}\t{}\t{}\n",
-            mtime,
-            onpane.get(&p).map(|s| s.as_str()).unwrap_or("-"),
-            p,
+            "{}\t{}\t{}\t{}\t{}\n",
+            past.mtime,
+            onpane.get(&past.key).map(|s| s.as_str()).unwrap_or("-"),
+            past.agent,
+            past.key,
             meta
         ));
     }
@@ -456,18 +420,67 @@ pub fn sessions_scan(live: &[(String, PathBuf)]) {
     let _ = std::fs::remove_file(&tmp);
 }
 
-/// The content of the ENDED conversations, so the search reaches them too.
+/// The content of the PAST conversations, so the search reaches them too.
 ///
-/// Keyed by the transcript rather than by a pane, since that is the only name an
-/// ended session has; `index_pane` then treats it exactly like a live one, which
+/// This is half the reason the list exists: what you remember about last Tuesday
+/// is what was said, not where it ran. Keyed by `dead:<agent>:<key>`, since a
+/// past session has no pane; it is then indexed exactly like a live one, which
 /// means it is read once and never again, because a conversation nothing is
 /// running does not grow.
 pub fn index_dead() {
-    for e in index::sessions() {
-        if e.pane == "-" && !e.path.is_empty() {
-            index_pane(&format!("dead:{}", e.path), Path::new(&e.path));
+    let work: Vec<(String, String)> = index::sessions()
+        .into_iter()
+        .filter(|e| e.pane == "-" && !e.key.is_empty())
+        .map(|e| (e.agent, e.key))
+        .collect();
+
+    // The store-backed ones stay on this thread. There is one database behind
+    // all of them, and opening it from several threads at once is a risk taken
+    // for no gain: a hundred indexed lookups is not where a pass spends its time.
+    let (db_backed, files): (Vec<_>, Vec<_>) =
+        work.into_iter().partition(|(agent, _)| agent == "opencode");
+
+    // The files are where it does. A cold pass extracts the prose from a
+    // gigabyte of transcripts, and it is CPU rather than disk: 27.7s of user
+    // time against 1.9s of system, measured here. Since each conversation is
+    // read and written independently, splitting them across threads is the whole
+    // fix, and it takes the first pass of a boot from 30s to single figures.
+    // A SHARED queue, not a slice each. Splitting the list into equal counts is
+    // the obvious way and it does not work here: conversation sizes are skewed
+    // by two orders of magnitude, and cutting a recency-sorted list in four put
+    // three quarters of the bytes in one piece. Measured: 0.2s, 0.2s, 0.4s and
+    // 13.1s. Threads that take the next conversation as they finish the last one
+    // cannot be handed the wrong share.
+    let threads = env_usize("TAIMUX_INDEX_THREADS", default_threads()).max(1);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let files = &files;
+    let next = &next;
+    std::thread::scope(|s| {
+        for _ in 0..threads {
+            s.spawn(move || loop {
+                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let Some((agent, key)) = files.get(i) else {
+                    return;
+                };
+                index_one(&index::past_id(agent, key), agent, key);
+            });
         }
+    });
+
+    for (agent, key) in db_backed {
+        index_one(&index::past_id(&agent, &key), &agent, &key);
     }
+}
+
+/// How many threads a cold pass uses by default.
+///
+/// Half the machine, at most four. This runs BEHIND a picker, on a box somebody
+/// is working on, so taking every core to read last month's conversations is the
+/// wrong trade even though it would finish sooner.
+fn default_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| (n.get() / 2).clamp(1, 4))
+        .unwrap_or(1)
 }
 
 /// Drop the index files nothing can reach any more.
@@ -484,10 +497,10 @@ pub fn prune() {
     }
     let keep: std::collections::HashSet<String> = sessions
         .iter()
-        .filter(|e| !e.path.is_empty())
+        .filter(|e| !e.key.is_empty())
         .map(|e| {
             if e.pane == "-" {
-                format!("dead:{}", e.path)
+                index::past_id(&e.agent, &e.key)
             } else {
                 e.pane.clone()
             }
@@ -502,10 +515,9 @@ pub fn prune() {
         .flatten()
     {
         let path = f.path();
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let Some(head) = text.lines().next() else {
+        // The header alone. Reading each file whole to reach its first line cost
+        // a pass ~200 MB once the history stopped being capped at 200.
+        let Some(head) = first_line(&path) else {
             continue;
         };
         let cols: Vec<&str> = head.split(' ').collect();
@@ -526,7 +538,16 @@ pub fn prune() {
     }
 }
 
-/// `ha:%6` is another host's pane. `%6` and `dead:/path` are ours.
+/// One file's first line, without reading the rest of it.
+fn first_line(path: &Path) -> Option<String> {
+    use std::io::BufRead;
+    let fh = std::fs::File::open(path).ok()?;
+    let mut line = String::new();
+    std::io::BufReader::new(fh).read_line(&mut line).ok()?;
+    Some(line.trim_end_matches('\n').to_string())
+}
+
+/// `ha:%6` is another host's pane. `%6` and `dead:claude:/path` are ours.
 fn is_remote_id(id: &str) -> bool {
     match id.split_once(":%") {
         Some((host, n)) => {
@@ -670,88 +691,6 @@ mod tests {
         assert!(l.age() > 60);
         l.stamp();
         assert!(l.age() < 5);
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn session_meta_reads_backwards_and_prefers_a_custom_title() {
-        let d = std::env::temp_dir().join(format!("jmmeta{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        let f = d.join("t.jsonl");
-        std::fs::write(
-            &f,
-            concat!(
-                r#"{"cwd":"/w","version":"2.1.1"}"#,
-                "\n",
-                r#"{"type":"ai-title","aiTitle":"what the model called it"}"#,
-                "\n",
-                r#"{"type":"custom-title","customTitle":"what I called it"}"#,
-                "\n"
-            ),
-        )
-        .unwrap();
-        let (cwd, ver, ttl, src) = session_meta(&f);
-        assert_eq!((cwd.as_str(), ver.as_str()), ("/w", "2.1.1"));
-        assert_eq!(ttl, "what I called it");
-        assert_eq!(src, "t");
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// An untitled session falls back to the last prompt, and says so with `p`,
-    /// because a LIVE pane may borrow a real title but never a prompt.
-    #[test]
-    fn an_untitled_session_falls_back_to_its_last_prompt() {
-        let d = std::env::temp_dir().join(format!("jmmeta2{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        let f = d.join("t.jsonl");
-        std::fs::write(
-            &f,
-            concat!(
-                r#"{"cwd":"/w","version":"2.1.1"}"#,
-                "\n",
-                r#"{"type":"last-prompt","lastPrompt":"the thing\nI asked"}"#,
-                "\n"
-            ),
-        )
-        .unwrap();
-        let (_, _, ttl, src) = session_meta(&f);
-        assert_eq!(ttl, "the thing I asked");
-        assert_eq!(src, "p");
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    #[test]
-    fn a_long_prompt_is_cut_with_an_ellipsis() {
-        let d = std::env::temp_dir().join(format!("jmmeta3{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        let f = d.join("t.jsonl");
-        let long = "x".repeat(200);
-        std::fs::write(
-            &f,
-            format!(r#"{{"type":"last-prompt","lastPrompt":"{}"}}"#, long),
-        )
-        .unwrap();
-        let (_, _, ttl, _) = session_meta(&f);
-        assert_eq!(ttl.chars().count(), 80);
-        assert!(ttl.ends_with('…'));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// A tab in any of the three fields would shift every field after it, since
-    /// the cache is tab-separated.
-    #[test]
-    fn tabs_are_kept_out_of_the_cached_fields() {
-        let d = std::env::temp_dir().join(format!("jmmeta4{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        let f = d.join("t.jsonl");
-        std::fs::write(
-            &f,
-            "{\"cwd\":\"/w\\ta\",\"version\":\"1\",\"type\":\"custom-title\",\"customTitle\":\"a\\tb\"}\n",
-        )
-        .unwrap();
-        let (cwd, _, ttl, _) = session_meta(&f);
-        assert!(!cwd.contains('\t'));
-        assert!(!ttl.contains('\t'));
         let _ = std::fs::remove_dir_all(&d);
     }
 }

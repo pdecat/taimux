@@ -412,6 +412,11 @@ export TAIMUX_SEARCH=1
 FC="$TMP/fakeclaude"; mkdir -p "$FC/projects/p1" "$FC/projects/p2"
 _claude_dir() { printf '%s\n' "$FC"; }
 export CLAUDE_CONFIG_DIR="$FC"          # …and the same for taimux
+# Four of the five agents keep their history under $HOME rather than behind a
+# variable of their own, so the fixture only means anything with HOME pointed
+# somewhere empty. Without this the suite read the DEVELOPER'S history: 254 real
+# conversations arrived in a section asserting there were five.
+REALHOME="$HOME"; export HOME="$TMP/fakehome"; mkdir -p "$HOME"
 # session_meta is taimux's now. Read BACKWARDS and stopped as soon as it has
 # all three, which is what makes hundreds of conversations affordable, so these
 # assertions are about what it stops on rather than about parsing.
@@ -473,29 +478,31 @@ scan() { "$XBIN" index-sessions; }
 printf '%%9\t%s\n' "$B" | scan
 eq "the header says when it was taken"  "sess" "$(awk 'NR==1{print $1}' "$SF")"
 eq "one line per conversation"          "5"    "$(( $(wc -l < "$SF") - 1 ))"
-eq "newest first"                       "$A"   "$(awk -F'\t' 'NR==2{print $3}' "$SF")"
+eq "newest first"                       "$A"   "$(awk -F'\t' 'NR==2{print $4}' "$SF")"
 eq "a conversation a pane is on carries that pane" "%9" \
-   "$(awk -F'\t' -v p="$B" '$3==p{print $2}' "$SF")"
+   "$(awk -F'\t' -v p="$B" '$4==p{print $2}' "$SF")"
 eq "…and one nothing is on carries a dash"         "-" \
-   "$(awk -F'\t' -v p="$A" '$3==p{print $2}' "$SF")"
-eq "the metadata rides along"           "/w/one" "$(awk -F'\t' -v p="$A" '$3==p{print $4}' "$SF")"
+   "$(awk -F'\t' -v p="$A" '$4==p{print $2}' "$SF")"
+eq "which agent wrote it is on the line"  "claude" "$(awk -F'\t' -v p="$A" '$4==p{print $3}' "$SF")"
+eq "the metadata rides along"           "/w/one" "$(awk -F'\t' -v p="$A" '$4==p{print $5}' "$SF")"
 
 # Re-reading half a gigabyte on every pass is the thing this must not do, so a
 # line whose transcript has not moved is reused verbatim. Marked, then checked.
 sed -i "s|\t/w/one\t|\tMARKER\t|" "$SF"
 printf '%%9\t%s\n' "$B" | scan
 eq "an untouched conversation is not read again" "MARKER" \
-   "$(awk -F'\t' -v p="$A" '$3==p{print $4}' "$SF")"
+   "$(awk -F'\t' -v p="$A" '$4==p{print $5}' "$SF")"
 touch -d '2026-01-01 11:00' "$A"
 printf '%%9\t%s\n' "$B" | scan
 eq "…and one that has said something since, is"  "/w/one" \
-   "$(awk -F'\t' -v p="$A" '$3==p{print $4}' "$SF")"
+   "$(awk -F'\t' -v p="$A" '$4==p{print $5}' "$SF")"
 
-# The corpus only grows (Claude Code's own cleanup is set to ten years here), so
-# both this list and the content index behind it are bounded by recency.
+# There is no cap by default any more: the bound used to be the newest 200, and
+# what it actually cost was the conversations you go looking for. The knob stays
+# for a machine that wants one back, and still takes the newest.
 TAIMUX_SESSIONS_MAX=2 scan </dev/null
 eq "the cap keeps the newest and drops the rest" "2" "$(( $(wc -l < "$SF") - 1 ))"
-eq "…keeping the newest of them"                 "$A" "$(awk -F'\t' 'NR==2{print $3}' "$SF")"
+eq "…keeping the newest of them"                 "$A" "$(awk -F'\t' 'NR==2{print $4}' "$SF")"
 printf '%%9\t%s\n' "$B" | scan     # put it back for the rows below
 
 # ============================================================================
@@ -508,13 +515,13 @@ DBIN="$HERE/../target/release/taimux"
 DR="$([ -x "$DBIN" ] && "$DBIN" dead-rows)"
 eq "only the ones nothing is running"  "4" "$(printf '%s\n' "$DR" | grep -c .)"
 hasnt "…so the one on a pane is left out" "$DR" "$B"
-has   "the id names the transcript"      "$DR" "dead:$A"
+has   "the id names the agent and the transcript" "$DR" "dead:claude:$A"
 eq "the label column is how long ago it stopped, not a pane" "1" \
-   "$(printf '%s\n' "$DR" | awk -F'\t' '$1=="dead:'"$A"'" && $2 ~ /^[0-9]+[mhd]$/ {print 1}')"
+   "$(printf '%s\n' "$DR" | awk -F'\t' '$1=="dead:claude:'"$A"'" && $2 ~ /^[0-9]+[mhd]$/ {print 1}')"
 eq "the state marks them as ended"       "dead" \
-   "$(printf '%s\n' "$DR" | awk -F'\t' '$1=="dead:'"$A"'"{print $6}')"
+   "$(printf '%s\n' "$DR" | awk -F'\t' '$1=="dead:claude:'"$A"'"{print $6}')"
 eq "an untitled one still says something" "the thing I asked it over two lines" \
-   "$(printf '%s\n' "$DR" | awk -F'\t' '$1=="dead:'"$C"'"{print $8}')"
+   "$(printf '%s\n' "$DR" | awk -F'\t' '$1=="dead:claude:'"$C"'"{print $8}')"
 
 # Nothing scanned yet is a real state: the indexer runs behind the picker, so the
 # first time this mode is opened after a boot it can genuinely have nothing.
@@ -553,7 +560,7 @@ sw() {
   printf '%s\n%s' "$out" "$(cat "$TMUXLOG")"
   return "$rc"
 }
-OUT="$(sw "dead:$A")"
+OUT="$(sw "dead:claude:$A")"
 has "enter resumes it in a new window"  "$OUT" "new-window -c /tmp/muxhop-w-one"
 has "…on the transcript itself"         "$OUT" "--resume $A"
 has '…through `command`, so no alias fires and resurrect can see it' \
@@ -561,11 +568,11 @@ has '…through `command`, so no alias fires and resurrect can see it' \
 # It refuses rather than falling back to $HOME: a session resumed in the wrong
 # directory writes its history into a different project, silently.
 sed -i "s|\t/tmp/muxhop-w-one\t|\t/nowhere/at/all\t|" "$SF"
-r=0; out="$(sw "dead:$A")" || r=1
+r=0; out="$(sw "dead:claude:$A")" || r=1
 eq "a directory that has gone is a refusal" "1" "$r"
 has "…and it says which"                    "$out" "/nowhere/at/all"
 hasnt "…and no window is opened"            "$out" "new-window"
-r=0; out="$(sw "dead:$FC/projects/p1/never.jsonl")" || r=1
+r=0; out="$(sw "dead:claude:$FC/projects/p1/never.jsonl")" || r=1
 eq "so is a transcript that has gone"       "1" "$r"
 has "…and it says that too"                 "$out" "no longer on disk"
 # A live pane is moved to rather than resumed, and the zoom is a TOGGLE, so a
@@ -584,7 +591,7 @@ scrub "$IDX"; mkdir -p "$IDX"
 NOW="$(date +%s)"
 idxfile() { printf 'idx 0 %s %s %s\n%s\n' "$2" "$1" "${3:--}" "blob" > "$IDX/$(printf '%s' "$1" | tr -c 'A-Za-z0-9' '_')"; }
 idxfile "%9"        "$NOW"                    # a live pane, per the cache above
-idxfile "dead:$A"   "$NOW"                    # an ended one the cache still knows
+idxfile "dead:claude:$A" "$NOW"                    # an ended one the cache still knows
 idxfile "%77"       "$NOW"                    # a pane that has since closed
 idxfile "ha:%6"     "$NOW"                    # another host, fresh
 idxfile "old:%6"    "$(( NOW - 200000 ))"     # another host, long silent
@@ -594,12 +601,95 @@ eq "a live pane keeps its blob"                  "yes" "$(present '_9')"
 # Age is the wrong test for an ended one: its blob is written once and never
 # touched, so any age rule would throw it away and re-read the transcript to get
 # it back. Membership of the cache is the honest question.
-eq "so does an ended session the cache tracks"   "yes" "$(present "$(printf '%s' "dead:$A" | tr -c 'A-Za-z0-9' '_')")"
+eq "so does an ended session the cache tracks"   "yes" "$(present "$(printf '%s' "dead:claude:$A" | tr -c 'A-Za-z0-9' '_')")"
 eq "a pane that closed does not"                 "no"  "$(present '_77')"
 eq "another host's blob is kept while it answers" "yes" "$(present 'ha__6')"
 eq "…and expires once it stops"                  "no"  "$(present 'old__6')"
+
+# ============================================================================
+section "past: the four agents that are not claude"
+# ============================================================================
+# Each keeps its history somewhere else and in its own shape, and all four are
+# under $HOME, which the fixture already owns. OpenCode is the exception and is
+# not here: it is a SQLite database, so there is nothing to write with printf.
+mkg() { mkdir -p "${1%/*}"; printf '%s\n' "${@:2}" > "$1"; }
+
+# Gemini: a chat log per session, and a project directory named by the SHA-256
+# of the path it was opened in. The hash is the whole reason taimux carries one.
+# The system's sha256, deliberately: taimux carries its own implementation, and
+# this fixture only resolves if the two agree.
+GHASH="$(printf '%s' /w/gem | sha256sum | cut -d' ' -f1)"
+mkg "$HOME/.gemini/projects.json" '{ "projects": { "/w/gem": "gemlabel" } }'
+mkdir -p /w 2>/dev/null || true
+GS="$HOME/.gemini/tmp/$GHASH/chats/session-2026-01-01T00-00-abcd1234.jsonl"
+mkg "$GS" \
+  "{\"sessionId\":\"g1\",\"projectHash\":\"$GHASH\"}" \
+  '{"id":"m1","type":"user","content":"the gemini question"}' \
+  '{"id":"m2","type":"gemini","content":[{"text":"the gemini answer"}]}'
+
+# …and the legacy shape: ONE pretty-printed object with a messages array, which
+# is most of the sessions on a machine that has had Gemini a while.
+GL="$HOME/.gemini/tmp/gemlabel/chats/session-2026-01-02T00-00-beef5678.json"
+mkdir -p "${GL%/*}"
+cat > "$GL" <<'GEMJSON'
+{
+  "sessionId": "g2",
+  "messages": [
+    { "id": "n1", "type": "user", "content": [ { "text": "the legacy question" } ] }
+  ]
+}
+GEMJSON
+
+# Antigravity: a transcript per conversation, with the directory in a separate
+# history file keyed by the conversation id, which is also the directory name.
+AS="$HOME/.gemini/antigravity-cli/brain/conv-777/.system_generated/logs/transcript.jsonl"
+mkdir -p /tmp/muxhop-agy /tmp/muxhop-codex 2>/dev/null
+mkg "$HOME/.gemini/antigravity-cli/history.jsonl" \
+  '{"conversationId":"conv-777","workspace":"/tmp/muxhop-agy"}'
+mkg "$AS" \
+  '{"type":"USER_INPUT","content":"<USER_REQUEST>the agy question</USER_REQUEST><ADDITIONAL_METADATA>noise</ADDITIONAL_METADATA>"}' \
+  '{"type":"PLANNER_RESPONSE","content":"the agy answer"}'
+
+# Codex: a rollout, in the newer of its two schemas.
+CS="$HOME/.codex/sessions/2026/01/rollout-2026-01-03-11111111-2222-3333-4444-555555555555.jsonl"
+mkg "$CS" \
+  '{"type":"session_meta","payload":{"id":"11111111-2222-3333-4444-555555555555","cwd":"/tmp/muxhop-codex"}}' \
+  '{"type":"event_msg","payload":{"type":"user_message","message":"the codex question"}}'
+
+scan </dev/null
+PR="$("$XBIN" dead-rows)"
+agentof() { printf '%s\n' "$PR" | awk -F'\t' -v k="$1" '$1==k{print $4}'; }
+titleof() { printf '%s\n' "$PR" | awk -F'\t' -v k="$1" '$1==k{print $8}'; }
+cwdof()   { printf '%s\n' "$PR" | awk -F'\t' -v k="$1" '$1==k{print $3}'; }
+
+eq "a gemini chat is listed as gemini"  "gemini" "$(agentof "dead:gemini:$GS")"
+eq "…titled by what it was first asked" "the gemini question" "$(titleof "dead:gemini:$GS")"
+# The directory is not in the chat log at all: it is the SHA-256 in the path.
+eq "…in the directory its hash decodes to" "/w/gem" "$(cwdof "dead:gemini:$GS")"
+eq "the legacy layout reads the same"   "the legacy question" "$(titleof "dead:gemini:$GL")"
+eq "an agy transcript is listed as agy" "agy" "$(agentof "dead:agy:$AS")"
+eq "…with the metadata block left off"  "the agy question" "$(titleof "dead:agy:$AS")"
+eq "…and the directory from its history file" "/tmp/muxhop-agy" "$(cwdof "dead:agy:$AS")"
+eq "a codex rollout is listed as codex" "codex" "$(agentof "dead:codex:$CS")"
+eq "…with the cwd off its session record" "/tmp/muxhop-codex" "$(cwdof "dead:codex:$CS")"
+
+# Enter resumes each in ITS OWN tool, and the one tool that cannot be told which
+# session to resume says so rather than opening the wrong one.
+OUT="$(sw "dead:agy:$AS")"
+has "agy resumes by conversation id"  "$OUT" "command agy --conversation conv-777"
+OUT="$(sw "dead:codex:$CS")"
+has "codex resumes by session id"     "$OUT" \
+    "command codex resume 11111111-2222-3333-4444-555555555555"
+# Gemini keeps its id in the chat log's header; the filename carries only the
+# first eight characters of it.
+mkdir -p /tmp/muxhop-gem 2>/dev/null
+sed -i "s|\t/w/gem\t|\t/tmp/muxhop-gem\t|" "$SF"
+OUT="$(sw "dead:gemini:$GS")"
+has "gemini resumes by the id in its header" "$OUT" "command gemini --resume g1"
+
 export TAIMUX_SEARCH=0
 unset -f _claude_dir
+export HOME="$REALHOME"
 
 # ============================================================================
 section "conversation: claude attach, which names a session outright"

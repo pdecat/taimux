@@ -14,7 +14,7 @@ untouched, and removing it leaves nothing behind. See
 
 ![taimux: the picker listing agent sessions across local panes and a remote
 host, filtering them by typing, and cycling with Tab through the sessions that
-are waiting, working, running outdated code, and have ended](demo/demo.gif)
+are waiting, working, running outdated code, and have already ended](demo/demo.gif)
 
 *Recorded from [`demo/demo.sh`](demo/demo.sh), which builds an isolated tmux
 server full of synthetic sessions: every project, task and agent above is
@@ -32,7 +32,7 @@ fabricated. Run it yourself with `just demo`.*
 Each row is a tmux pane whose **foreground process is a coding agent**, labelled
 with its `session:window.pane`, then what that session is doing and the task
 summary it publishes as its pane title (or, for a pane that publishes none yet,
-[the title its conversation last recorded](#sessions-that-ended)), and pinned to the right edge the working
+[the title its conversation last recorded](#past-sessions)), and pinned to the right edge the working
 directory (last two components), the agent and the version it is running. The
 summary comes first because it is what you read the list for; everything that only
 says *where* the session is sits behind it, costing it no width, aligned in columns
@@ -66,7 +66,7 @@ ones. Same pane scan, same reading of what each session is doing. See
 - [A terminal that changes size](#a-terminal-that-changes-size)
 - [Searching what a session said](#searching-what-a-session-said)
 - [Sessions running outdated code](#sessions-running-outdated-code)
-- [Sessions that ended](#sessions-that-ended)
+- [Past sessions](#past-sessions)
 - [Sessions on other hosts](#sessions-on-other-hosts)
 - [Putting a Claude Code session back](#putting-a-claude-code-session-back)
   - [`taimux restart`](#taimux-restart)
@@ -129,10 +129,10 @@ further stops that are not states at all. One asks a different question of the
 same list, what each session is *running* rather than what it is doing (see
 [Sessions running outdated code](#sessions-running-outdated-code)); the other is
 a different list entirely, the conversations nothing is running any more (see
-[Sessions that ended](#sessions-that-ended)).
+[Past sessions](#past-sessions)).
 
 ```
-all sessions  →  waiting  →  working  →  idle  →  outdated  →  ended sessions  →  all sessions
+all sessions  →  waiting  →  working  →  idle  →  outdated  →  past sessions  →  all sessions
 ```
 
 The border label names the list you are looking at, and the mode is kept across a
@@ -316,6 +316,10 @@ compare against.
 - `tac`, `find` and `date`, for `restart` / `resurrect` / `print-cmds` only
 - `ssh`, only for [sessions on other hosts](#sessions-on-other-hosts), plus a
   `taimux` on each of those hosts. With no ssh panes open none of it runs
+- **nothing at all** for [past sessions](#past-sessions): every agent's history is
+  read by taimux itself, including the two that keep theirs in SQLite. There is
+  no `sqlite3` to install and no agent that has to be present for the others to
+  be listed
 
 ## Install
 
@@ -461,8 +465,8 @@ Inside the picker:
 | wheel          | move, one row per notch (wraps, like the arrows) |
 | click          | put the cursor on that row       |
 | double-click   | …and switch to it, as `Enter` would |
-| `Enter`        | switch to the pane (and zoom it), or [reopen an ended session](#sessions-that-ended) |
-| `Tab`          | cycle the list: all → waiting → working → idle → [outdated](#sessions-running-outdated-code) → [ended](#sessions-that-ended) → all |
+| `Enter`        | switch to the pane (and zoom it), or [reopen a past session in its own tool](#past-sessions) |
+| `Tab`          | cycle the list: all → waiting → working → idle → [outdated](#sessions-running-outdated-code) → [past](#past-sessions) → all |
 | `Ctrl-r`       | refresh the list now            |
 | `Ctrl-/`       | toggle the preview              |
 | `Ctrl-x`       | restart the highlighted claude session onto the installed version |
@@ -552,10 +556,10 @@ list should not sail past the end and land back at the top with nothing on the
 row to say so.
 
 `Shift-↑` and `Shift-↓` scroll the **preview**, which is a window onto
-something longer: a live pane's whole screen, or the last turns of an ended
+something longer: a live pane's whole screen, or the last turns of a past
 conversation. A pane's preview opens on the **bottom** of its screen, since what
 a session is doing is the last thing on it, so `Shift-↑` is how you see what came
-before; an ended conversation opens at the top and reads forwards. It stops at
+before; a past conversation opens at the top and reads forwards. It stops at
 both ends, and the offset resets when the cursor moves, because an offset
 measured against one session's screen means nothing on the next.
 
@@ -576,7 +580,7 @@ back when the first scan was the one thing the picker still waited on.
 
 With **nothing to list**, the picker says so rather than closing again: a machine
 with no agent sessions running, a `Tab` filter nothing is in, a query nobody
-matches and an empty ended list each read differently, and each says which key
+matches and an empty past-sessions list each read differently, and each says which key
 gets you out. It used to close itself on an empty list, which was reported as
 "F1 no longer works" by someone whose machine simply had nothing running: an
 empty popup that opens and shuts is indistinguishable from an unbound key, a
@@ -733,9 +737,20 @@ That last one is not hypothetical: the deferred-tool list alone puts
 `EnterWorktree` in every session, and indexing it made `worktree` match 154
 sessions instead of the 9 that had discussed one.
 
-It is **claude-only**, like `restart` and `resurrect` and for the same reason: it
-has to know which conversation a pane is on, and claude is the only agent that
-publishes that. Rows for other agents still match on what they show.
+For a **live pane** it is claude-only, like `restart` and `resurrect` and for the
+same reason: it has to know which conversation a pane is on, and claude is the
+only agent that publishes that. Live rows for other agents still match on what
+they show.
+
+For a **[past session](#past-sessions)** that limit does not apply, because a
+conversation on disk names itself: every agent's history is indexed, so a word
+from inside a Gemini chat or an OpenCode session finds it too. Each is boiled
+down the same way, and each needed its own exclusions for the same reason claude
+needed `<system-reminder>`: Gemini opens a session with a `<session_context>`
+block carrying the whole workspace listing, Codex staples an
+`<environment_context>` to your first message, and Antigravity adds
+`<ADDITIONAL_METADATA>` to everything you type. Indexing any of those would put
+every project's file names in every conversation that ever touched it.
 
 | variable | default | |
 |---|---|---|
@@ -769,7 +784,7 @@ the three above it. What it holds is exactly the rows `Ctrl-x` and `F8` act on,
 and for the same reasons: never a session on
 [another host](#sessions-on-other-hosts) (the installed version here says
 nothing about what that box would start), never an
-[ended](#sessions-that-ended) one however far behind it last ran (there is no
+[past](#past-sessions) one however far behind it last ran (there is no
 process to put back), and never another agent (only claude publishes what it
 would take to relaunch it). One predicate answers both the colour and the list,
 so the two can never disagree.
@@ -782,37 +797,105 @@ The stop is not in the cycle at all where nothing is installed to compare a
 version against (no launcher under `~/.local/share/claude/versions/`, or
 `TAIMUX_VERSIONS=0`), since every row would then be judged against nothing.
 Tab skips it rather than landing on a list that could only ever be empty,
-exactly as it skips the ended list without a sessions cache.
+exactly as it skips the past list without a sessions cache.
 
-## Sessions that ended
+## Past sessions
 
 Everything above lists **panes**, so everything above can only find a session
 that is still running. The ones you actually lose are the other kind: a pane
 closed, a tmux server restarted, a machine rebooted, and a conversation you were
-three hours into is now a file nothing points at. `claude --resume` will bring it
-back, but only if you can say *which* one, and by then you rarely can.
+three hours into is now a file nothing points at. The tool that wrote it will
+bring it back, but only if you can say *which* one, and by then you rarely can.
 
-Tab's last stop lists them:
+Tab's last stop lists them, **across every agent**:
 
 ```
-ended sessions                                                             174/174
+past sessions                                                              712/712
 
-  3h    billing: reconcile the ledger                services/billing  claude 2.1.229
-  2d    api: retire the v1 endpoints                 webapp/api        claude 2.1.229
-  6d    taimux: debug-tmux-script-issue             ai/taimux        claude 2.1.243
+  3h    billing: reconcile the ledger              services/billing   claude 2.1.229
+  2d    Docker networking on the spot VM           cloud/platform     opencode
+  6d    taimux: debug-tmux-script-issue            ai/taimux          claude 2.1.243
+  41d   why are my chrome windows not tiled?       ~                  agy
+  119d  Resolve the conflict                       homeassistant/…    gemini
 ```
 
 How long ago it stopped goes where a pane label would, because that column is the
-one thing an ended session cannot have and the one thing you sort them by in your
-head. **Enter** opens the conversation again, in a new window, in the directory it
-ran in. The **preview** shows how it left off, the last few turns with your own
-prompt among them. And
+one thing a past session cannot have and the one thing you sort them by in your
+head. **Enter** opens the conversation again, **in its own tool**, in the
+directory it ran in. The **preview** shows how it left off, the last few turns
+with your own prompt among them. And
 [transcript search](#searching-what-a-session-said) covers these too, which is
 half the reason to have them: what you remember about last Tuesday is what was
 said, not where it ran.
 
-A few decisions worth knowing:
+### Five agents, three shapes
 
+| agent | where it keeps a conversation | what Enter runs |
+|---|---|---|
+| Claude Code | `~/.claude/projects/<project>/<uuid>.jsonl` | `claude --resume <transcript>` |
+| Codex | `~/.codex/sessions/**/rollout-*.jsonl` | `codex resume <id>` |
+| Gemini | `~/.gemini/tmp/<project>/chats/session-*.jsonl` | `gemini --resume <id>` |
+| Antigravity | `~/.gemini/antigravity-cli/brain/<id>/…/transcript.jsonl` | `agy --conversation <id>` |
+| OpenCode | `~/.local/share/opencode/opencode.db` | `opencode --session <id>` |
+
+Each is read where it is, in whatever shape it is in, and each one had something
+in it worth knowing:
+
+- **Gemini names its project directory after a SHA-256** of the path the session
+  was opened in, so taimux carries a SHA-256 to read it. Half the directories on
+  this machine are hashes and half are friendly labels, depending on which
+  version wrote them, and both are resolved through `~/.gemini/projects.json`.
+  It also has **two layouts**, one object per line and one pretty-printed object
+  holding a `messages` array; the second is 106 of the 132 sessions here, and a
+  line-based reader finds nothing at all in it. Both are read by the same code,
+  by marker rather than by line.
+- **Gemini's id is in the header, not in the filename**, which carries only its
+  first eight characters. `--resume` is a recent addition over there and rses
+  predates it, which is also the one thing on this page not verified against a
+  live tool: Gemini is not installed on the machine this was written on, so the
+  flag is what its session-management documentation specifies and everything
+  else here was checked against real data.
+- **Antigravity keeps the directory somewhere else entirely**, in a
+  `history.jsonl` keyed by conversation id, and staples an
+  `<ADDITIONAL_METADATA>` block to everything you type. The block is dropped.
+- **Codex has two schemas**, and a rollout is one or the other depending on when
+  it was written. Their record shapes are disjoint, so both are recognised per
+  record, which is what lets a backwards reader that cannot see line 0 read
+  either. Its own `state_<n>.sqlite` index is not used: everything the list needs
+  is in the rollout, so this keeps working when that database changes shape.
+- **OpenCode is a database**, which changes three things: the key is a session id
+  rather than a path, there is no transcript to hand anyone, and its
+  fingerprint is a timestamp rather than a byte count. It is read through
+  [turso](https://github.com/tursodatabase/turso), a pure-Rust SQLite, so
+  `cargo build` still needs no C toolchain and the release is still one static
+  binary. `--no-default-features` drops it and nothing else.
+
+**Nothing is ever written where those tools live.** SQLite creates a `-wal` file
+beside whatever path it is handed, so opening `opencode.db` where it lives drops
+a file into another program's directory while that program may be running.
+taimux opens a **symlink** in its own runtime directory instead, which puts the
+`-wal` next to the symlink: same inode, same bytes read, nothing at all written
+where OpenCode can see it.
+
+### Only claude can be told apart from a live pane
+
+Which conversation a pane is on is something the agent has to publish, and claude
+is the only one that does (see [Told, rather than guessed](#told-rather-than-guessed)).
+So a **claude** session that is open in a pane is left out of this list, because
+it is already on every other one. A session belonging to any other agent is not:
+taimux cannot tell, and pretending otherwise would mean guessing.
+
+That is why this is "past sessions" rather than "ended" ones. It is the history,
+and a conversation you happen to be in right now is part of it.
+
+### A few decisions worth knowing
+
+- **There is no cap.** There used to be one, at the newest 200, and what it cost
+  was exactly the sessions you go looking for: a conversation from last month is
+  the one you cannot find any other way, and it is also the first one a recency
+  cap drops. With 572 claude transcripts here, two thirds of the history was
+  invisible and nothing on the list said so. `TAIMUX_SESSIONS_MAX` still exists
+  for a machine that wants a bound back; it defaults to `0`, meaning none.
 - **Enter refuses if the directory has gone**, rather than falling back to
   `$HOME`. A session resumed in the wrong directory writes its history into a
   different project, and does it silently.
@@ -825,28 +908,51 @@ A few decisions worth knowing:
   ever titled (a short one, or one that was cleared), and the prompt it was last
   given identifies it far better than `(no title)`. One of the ones here turns out
   to be the tail of a pasted config file, which is exactly the session you would
-  go looking for.
-- **It is claude-only and local-only**, on the same rule as
-  [restart](#taimux-restart): a conversation lives on the box that had the pane,
-  and resuming one is `claude` in a directory over there.
+  go looking for. For the agents that record no title at all, the opening prompt
+  *is* the title.
+- **Subagents are not sessions.** A claude subagent writes to
+  `projects/<proj>/<session>/subagents/agent-*.jsonl`, and a workflow's goes a
+  level deeper still. Those are sidechains of a conversation that is itself in
+  the list, they carry no title and no directory, and resuming one opens
+  something nobody ever had a pane on. 72 of them were on this list; they are
+  not now.
+- **It is local-only**, on the same rule as [restart](#taimux-restart): a
+  conversation lives on the box that had the pane, and resuming one is a command
+  in a directory over there.
 
 The list comes off a cache the [background indexer](#searching-what-a-session-said)
-builds in the same pass, so it costs the picker nothing to open. Building it reads
-the *end* of each transcript and stops as soon as it has the directory, the
-version and the title, all three of which recent records restate: 413
-conversations and half a gigabyte here take about a second cold, and after that
-only the ones that have said something since are read again.
+builds in the same pass, so it costs the picker nothing to open.
+
+### What a pass costs
+
+A pass has to answer two questions about every conversation: what a row says
+about it, and what it said. Both used to be answered by reading it, and going
+from 200 conversations to 712 made that a thirty-second pass. It is **1.1s cold
+and 0.12s warm** now, over more than three times the history, and every part of
+that came from measuring rather than guessing:
+
+- **Ask before reading.** A conversation reports a fingerprint (a file's length,
+  a row's timestamp) for a `stat` or an indexed lookup. Reading it to find out it
+  had nothing new was a gigabyte of I/O per pass.
+- **Read the tail, not the file.** Everything a row says is restated near the end
+  of a transcript, so a 37 MB conversation costs the same as a small one.
+- **The prose extractor was quadratic**, and had been since before any of this:
+  pulling one JSON string out of a record copied everything from the match to the
+  end of the LINE, three times, and a record holds many strings. 978 MB of
+  transcripts took 14s to extract and take 1.6s now. That fix helps every live
+  session too.
+- **A shared queue, not a slice each.** Conversation sizes are skewed by two
+  orders of magnitude, so cutting a recency-sorted list into four equal counts
+  put three quarters of the bytes in one piece: 0.2s, 0.2s, 0.4s and 13.1s.
+  Threads that take the next conversation as they finish the last cannot be
+  handed the wrong share.
 
 | variable | default | |
 |---|---|---|
 | `TAIMUX_SESSIONS` | `1` | `0` takes the stop out of the Tab cycle |
-| `TAIMUX_SESSIONS_MAX` | `200` | how many conversations are tracked, newest first |
+| `TAIMUX_SESSIONS_MAX` | `0` | a cap on how many conversations are tracked, newest first; `0` is none |
 | `TAIMUX_DEAD_TURNS` | `6` | turns of the conversation the preview shows |
-
-That cap is not tidiness. Claude Code's transcript retention is a setting, and
-anyone who raises it (`cleanupPeriodDays`) has a directory that only grows, so
-both this list and the content index behind it have to be bounded by something
-that is not "however much is on disk". Recency is the only sensible bound.
+| `TAIMUX_INDEX_THREADS` | half the machine, at most 4 | threads a pass reads with |
 
 ## Sessions on other hosts
 
@@ -1122,7 +1228,7 @@ should imitate neither.
 - The hook lines live in `$XDG_RUNTIME_DIR/taimux/`, so they die with the boot
   rather than outliving the pids they name. `SessionEnd` removes its own. The
   [transcript index](#searching-what-a-session-said), the list of
-  [conversations](#sessions-that-ended) and the pane scan behind a keystroke are
+  [conversations](#past-sessions) and the pane scan behind a keystroke are
   cached there too, for the same reason: none of it is worth keeping across a
   reboot, and all of it is cheap to rebuild.
 - **A paste that lands while the picker is open cannot escape it.** The picker
@@ -1151,7 +1257,7 @@ rather than by convention:
 
 | | |
 |---|---|
-| `core/` | pane scanning, transcripts, agent versions, paths. **No external dependencies at all** |
+| `core/` | pane scanning, transcripts, agent versions, paths, every agent's history. **One dependency, behind a default feature** |
 | `daemon/` | the socket, the protocol both ends speak, and the background indexer. Depends only on `core` |
 | `cli/` | the picker, the row layout, restart, resurrect, ssh federation. The only crate that links a terminal library |
 | `src/` | the dispatcher, and the one binary everything ships as |
@@ -1207,10 +1313,24 @@ so a dialog four lines from the content's end was twenty lines from the text's
 end, and every session waiting for an answer read as idle. Bash never had to think
 about it because `$(...)` strips trailing newlines for free.
 
-Four dependencies, and the count is deliberate: everything that can be std is
-(the `/proc` scan, the socket, the protocol, the transcript parsing). The four
-are what the picker below needs: `ratatui`, `crossterm`, `unicode-width` and
-`fuzzy-matcher`.
+Five dependencies, and the count is deliberate: everything that can be std is
+(the `/proc` scan, the socket, the protocol, the transcript parsing, the SHA-256
+Gemini names its project directories with). Four are what the picker below needs:
+`ratatui`, `crossterm`, `unicode-width` and `fuzzy-matcher`.
+
+The fifth is [turso](https://github.com/tursodatabase/turso), a pure-Rust SQLite,
+and it is the only one `core` takes. Two agents keep their conversations in a
+database rather than in files, and reading a b-tree by hand is several hundred
+lines that have to be right about overflow pages and WAL frames. Pure Rust is
+what makes it affordable: `cargo build` still needs no C toolchain and the
+release is still one static musl binary. It sits behind the default `sqlite`
+feature, so `--no-default-features` drops it, and the only thing that changes is
+that [OpenCode and Codex rows](#past-sessions) stop appearing.
+
+It is not free: the static release artefact went from 1.1 MB to 12.8 MB, so
+turso is now most of what a host downloads. That is a real cost and it bought one
+agent's history on this machine, which is the trade to re-examine if it ever
+buys less.
 
 ## Not a shell script
 
@@ -1226,7 +1346,7 @@ implementations, byte-identical out**, on live data, before the bash was deleted
 | the row layout | 440 of 440 combinations, frozen as `tests/golden/rows.expected` |
 | the transcript extractor | 436 of 436 real transcripts |
 | the indexer | 200 of 200 index files, 199 of 200 blobs |
-| the preview | 30 of 30 live panes, 8 of 8 ended, and the remote row |
+| the preview | 30 of 30 live panes, 8 of 8 past, and the remote row |
 | `print-cmds` | every pane, three consecutive runs |
 | `restart -n` | every option combination |
 | resurrect | the rewritten save file, over a real 198-line save |
@@ -1360,8 +1480,18 @@ features herdr has no equivalent for. Whatever pane is already `ssh`'d into
 another box *is* the remote configuration, so there is nothing to register. And
 because the conversations are just files on disk, taimux can
 [search what a session said](#searching-what-a-session-said) and
-[list the ones that have ended](#sessions-that-ended), not only the ones still
+[list the ones that have ended](#past-sessions), not only the ones still
 running.
+
+[`rses`](https://github.com/yazcaleb/rses) asked the other half of the question,
+and [past sessions](#past-sessions) is its idea: browse every tool's
+conversations in one list, whether or not anything is running them. It has no
+tmux in it at all, which is exactly why the two fit together rather than
+competing: it was the answer to "which conversation was that", and this is that
+answer inside the picker you already open. What came across is the tail-read
+preview and the observation that a harness's injected blocks will otherwise flood
+a search index. What did not is its Node runtime, and its cap-free listing is now
+the default here rather than the exception.
 
 Smaller neighbours worth knowing:
 [`tmux-agent`](https://github.com/trentdavies/tmux-agent) (`ta`, Rust, embedded

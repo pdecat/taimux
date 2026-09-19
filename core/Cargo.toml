@@ -1,9 +1,16 @@
 # The half that has no opinion about terminals.
 #
-# ZERO external dependencies, and that is a property worth keeping rather than an
-# accident: everything here is /proc, tmux plumbing, transcript reading and the
-# protocol's vocabulary, none of which needs a crate. `cargo tree -p taimux-core`
-# showing nothing is the test.
+# It had ZERO external dependencies, and that was a property worth keeping rather
+# than an accident: everything here is /proc, tmux plumbing, transcript reading
+# and the protocol's vocabulary, none of which needs a crate.
+#
+# ONE crate now earns its place, and only behind a feature. Two agents keep their
+# conversations in SQLite rather than in files (OpenCode, and recent Codex), and
+# reading a b-tree by hand is several hundred lines that have to be right about
+# overflow pages and WAL frames. turso is a pure-Rust SQLite, so the thing this
+# project actually ships survives it: no C toolchain, and one static musl binary.
+# `--no-default-features` drops it, and with it those two agents' rows, which is
+# the only thing it can affect.
 [package]
 name = "taimux-core"
 version = "0.11.1"
@@ -13,4 +20,13 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Shared internals for taimux: pane scanning, transcripts, agent versions, paths."
 
+[features]
+default = ["sqlite"]
+# read OpenCode's and Codex's SQLite session stores
+sqlite = ["dep:turso"]
+
 [dependencies]
+# default-features off on purpose: `fts` (full-text search) and `mimalloc` are
+# both dead weight for four SELECTs, and dropping them takes ~3.7 MB off the
+# binary every host downloads.
+turso = { version = "0.7.2", default-features = false, optional = true }
