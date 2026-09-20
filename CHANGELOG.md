@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/pdecat/taimux/compare/v0.15.0...v0.15.1) (2026-09-20)
+
+
+### Bug fixes
+
+* a pane too short to show a prompt box is read, not skipped ([62c8f01](https://github.com/pdecat/taimux/commit/62c8f0101780c2e93b94a462157248949a3dbe9a))
+
 ## [0.15.0](https://github.com/pdecat/taimux/compare/v0.14.0...v0.15.0) (2026-09-20)
 
 

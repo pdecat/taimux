@@ -1386,7 +1386,7 @@ dependencies = [
 
 [[package]]
 name = "taimux"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "taimux-cli",
  "taimux-core",
@@ -1395,7 +1395,7 @@ dependencies = [
 
 [[package]]
 name = "taimux-cli"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "crossterm",
  "fuzzy-matcher",
@@ -1406,14 +1406,14 @@ dependencies = [
 
 [[package]]
 name = "taimux-core"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "rusqlite",
 ]
 
 [[package]]
 name = "taimux-daemon"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "taimux-core",
 ]
