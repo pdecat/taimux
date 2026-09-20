@@ -18,7 +18,7 @@
 # SQLITE_OPEN_READ_ONLY that turso does not offer.
 [package]
 name = "taimux-core"
-version = "0.15.0"
+version = "0.15.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
