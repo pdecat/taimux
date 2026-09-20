@@ -1411,9 +1411,22 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
     // 0 turns the timer off, as TAIMUX_REFRESH does for the fzf picker. There is
     // no idle gate here: fzf needs one because a reload blocks its input loop and
     // swallows keystrokes, and a tick in this loop is just a redraw.
+    //
+    // One second, down from three on 2026-09-20. Three was inherited from the
+    // bash picker, where a refresh re-execed the script and blocked fzf's input
+    // loop while it did; here it runs on a thread, the rows already on screen
+    // stay up while it is out, and what the interval buys is how fast a session
+    // that starts waiting for you turns `✳` while you are looking at the list.
+    // Measured on 35 panes a scan is 85 ms, so a second apart it is under a tenth
+    // of one core, and only while a picker is open.
+    //
+    // Not lower, and this is the floor rather than a preference: the screen
+    // capture a daemon serves is cached for 750 ms, so two refreshes closer than
+    // that would be answered from one capture, and the second would report a
+    // state that had already been read rather than looking again.
     let refresh: f32 = env::var("TAIMUX_REFRESH")
         .and_then(|v| v.parse().ok())
-        .unwrap_or(3.0);
+        .unwrap_or(1.0);
     let live = refresh > 0.0;
 
     let mut app = App {

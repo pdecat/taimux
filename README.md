@@ -251,9 +251,10 @@ The pane you're in is marked `●` and is selected by
 default when the picker opens. A live preview of the highlighted pane is shown
 below the list. Hit **Enter** to
 jump straight to that pane, across windows and sessions, and it's automatically
-zoomed to fill its window. The list refreshes itself while the picker is open (a
-beat after you pause, so it never interrupts your navigation), so sessions that
-start or finish appear and disappear on their own (the border reads `· live`).
+zoomed to fill its window. The list refreshes itself once a second while the
+picker is open, on a thread of its own so it never interrupts your typing or
+your place in the list, so sessions that start or finish appear and disappear on
+their own (the border reads `· live`).
 
 **Pressed from a pane that is not an agent session**, which is what `F1` from a
 shell is, there is no `●` row to open on, and the cursor goes to the session
@@ -300,7 +301,7 @@ showing it. It is read off the live process, cheapest source first:
 3. failing both, `--version` on that same binary (the file the pane is running,
    never whatever `$PATH` points at now), cached under `$XDG_CACHE_HOME/taimux`
    and keyed by the binary's path and mtime, since the picker rebuilds the list
-   every few seconds.
+   every second.
 
 When none of them can tell, nothing is shown rather than a version the pane may
 not be running. Sources 1 and 3 read `/proc`, so on a system without it only
@@ -603,7 +604,13 @@ missing binary, or a popup that failed to start.
 The list **auto-refreshes** so sessions that start or exit show up on their own;
 the cursor stays pinned to the same session across refreshes, and so does the
 state `Tab` last filtered on. Tune it with `TAIMUX_REFRESH` (timer interval in
-seconds, fractional OK, default `3`; `0` disables and leaves just `Ctrl-r`).
+seconds, fractional OK, default `1`; `0` disables and leaves just `Ctrl-r`).
+What the interval really buys is how quickly a session that starts asking for
+you turns `✳` while you are looking at the list, which is most of what the list
+is open for. It is not free (a scan is 85 ms on 35 panes, so a second apart is
+under a tenth of a core, and only while a picker is open) and it does not go
+below 750 ms usefully, since that is how long a captured screen may be reused:
+two refreshes closer than that would read one capture twice.
 There is no idle gate: fzf needed one because a reload blocked its input
 loop and swallowed arrow keys mid-navigation, and a tick in the picker's own loop
 is just a redraw. A typed query and the cursor both survive one.
