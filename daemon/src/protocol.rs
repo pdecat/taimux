@@ -37,19 +37,22 @@ const CAPTURE_TTL: Duration = Duration::from_millis(750);
 /// line. Newline-delimited and human-readable on purpose, so a client can be a
 /// shell, a socat, or eventually the picker itself, and so a wedged daemon can be
 /// diagnosed by hand.
+///
+/// Answers `false` when the request was to stop, which is the only one that says
+/// anything about the daemon rather than about the panes.
 fn handle(
     stream: UnixStream,
     prober: &mut version::Prober,
     captures: &mut HashMap<String, String>,
-) {
+) -> bool {
     let mut reader = BufReader::new(match stream.try_clone() {
         Ok(s) => s,
-        Err(_) => return,
+        Err(_) => return true,
     });
     let mut out = stream;
     let mut line = String::new();
     if reader.read_line(&mut line).is_err() {
-        return;
+        return true;
     }
     let body = match line.trim() {
         "panes" => panes::agent_rows(),
@@ -72,11 +75,13 @@ fn handle(
         "rows" => format!("{}\n{}", VERSION, panes::list_rows(prober, captures)),
         "version" => format!("{}\n", VERSION),
         "ping" => "pong\n".to_string(),
+        "quit" => "bye\n".to_string(),
         other => format!("!unknown request: {}\n", other),
     };
     let _ = out.write_all(body.as_bytes());
     let _ = out.write_all(b"\n");
     let _ = out.flush();
+    line.trim() != "quit"
 }
 
 pub fn serve() -> std::io::Result<()> {
@@ -84,15 +89,30 @@ pub fn serve() -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
+    // Bind FIRST, and only ask questions about the path when that is refused.
+    //
     // A socket file outlives the process that made it, so a daemon that was
-    // killed leaves one behind that nothing is listening on. Clearing it is safe
-    // precisely because a live one would refuse the bind below.
-    if UnixStream::connect(&path).is_ok() {
-        eprintln!("taimux: already running at {}", path.display());
-        return Ok(());
-    }
-    let _ = std::fs::remove_file(&path);
-    let listener = UnixListener::bind(&path)?;
+    // killed leaves one behind that nothing is listening on, and it has to be
+    // cleared or nothing can ever bind again. This used to probe, unlink and
+    // then bind, which is the wrong order once daemons START THEMSELVES: two
+    // pickers opening together both found nobody listening, both unlinked, and
+    // both bound, leaving the first one holding a socket no client could reach
+    // and waiting out its idle timeout for nothing.
+    //
+    // Unlinking only after `AddrInUse` AND a connection that nothing answers
+    // means the file being removed is proven stale rather than assumed to be.
+    let listener = match UnixListener::bind(&path) {
+        Ok(l) => l,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            if UnixStream::connect(&path).is_ok() {
+                eprintln!("taimux: already running at {}", path.display());
+                return Ok(());
+            }
+            let _ = std::fs::remove_file(&path);
+            UnixListener::bind(&path)?
+        }
+        Err(e) => return Err(e),
+    };
 
     let mut last = Instant::now();
     let mut prober = version::Prober::new();
@@ -137,7 +157,9 @@ pub fn serve() -> std::io::Result<()> {
                     captures.clear();
                     captured_at = Instant::now();
                 }
-                handle(stream, &mut prober, &mut captures);
+                if !handle(stream, &mut prober, &mut captures) {
+                    break; // asked to stand down, see `quit`
+                }
                 last = Instant::now();
             }
             Err(RecvTimeoutError::Timeout) => {
@@ -191,6 +213,16 @@ fn rows_at(path: &Path) -> Option<String> {
     let body = ask_at(path, "rows")?;
     let (ver, rows) = body.split_once('\n')?;
     if ver != VERSION {
+        // …and ask it to stand down, or nothing ever replaces it. A daemon goes
+        // home after five idle minutes, but being ASKED is what keeps it from
+        // being idle, and a picker refusing this one is still asking it every
+        // refresh: left alone, the old build would be kept alive for as long as
+        // anyone used the picker, and the new one could never take the socket.
+        //
+        // Fire and forget. A daemon older than this word answers `!unknown
+        // request` and stays, which is no worse than before it was sent, and
+        // the client stops asking that socket for rows either way.
+        let _ = ask_at(path, "quit");
         return None;
     }
     // The protocol frames a body with a trailing blank line, so what arrives is
@@ -238,6 +270,24 @@ mod tests {
     /// client half can be driven without a real one. Its own socket, so nothing
     /// here touches `TAIMUX_SOCKET` or the developer's live daemon.
     fn fake(reply: &'static str) -> (std::path::PathBuf, std::thread::JoinHandle<String>) {
+        let (path, handle) = serve_replies(vec![reply]);
+        (
+            path,
+            std::thread::spawn(move || handle.join().unwrap().join(",")),
+        )
+    }
+
+    /// Two requests on one socket, for the exchange a refusal turns into.
+    fn fake_twice(
+        first: &'static str,
+        second: &'static str,
+    ) -> (std::path::PathBuf, std::thread::JoinHandle<Vec<String>>) {
+        serve_replies(vec![first, second])
+    }
+
+    fn serve_replies(
+        replies: Vec<&'static str>,
+    ) -> (std::path::PathBuf, std::thread::JoinHandle<Vec<String>>) {
         let path = std::env::temp_dir().join(format!(
             "taimux-test-{}-{:?}.sock",
             std::process::id(),
@@ -246,13 +296,17 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path).expect("bind the test socket");
         let handle = std::thread::spawn(move || {
-            let (stream, _) = listener.accept().expect("a client");
-            let mut reader = BufReader::new(stream.try_clone().expect("clone"));
-            let mut asked = String::new();
-            let _ = reader.read_line(&mut asked);
-            let mut out = stream;
-            let _ = out.write_all(reply.as_bytes());
-            asked.trim().to_string()
+            let mut asked = Vec::new();
+            for reply in replies {
+                let (stream, _) = listener.accept().expect("a client");
+                let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+                let mut line = String::new();
+                let _ = reader.read_line(&mut line);
+                let mut out = stream;
+                let _ = out.write_all(reply.as_bytes());
+                asked.push(line.trim().to_string());
+            }
+            asked
         });
         (path, handle)
     }
@@ -286,6 +340,18 @@ mod tests {
         let (path, srv) = fake("0.0.1\n%1\tw:1.1\t/h\n");
         assert_eq!(rows_at(&path), None);
         let _ = srv.join();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// …and is told to stand down, because refusing it is not enough: asking is
+    /// what keeps a daemon from being idle, so a picker that merely ignored the
+    /// old build would keep it alive for as long as it ran and the new one could
+    /// never have the socket.
+    #[test]
+    fn a_refused_daemon_is_asked_to_stand_down() {
+        let (path, srv) = fake_twice("0.0.1\n%1\tw:1.1\t/h\n", "bye\n");
+        assert_eq!(rows_at(&path), None);
+        assert_eq!(srv.join().unwrap(), vec!["rows", "quit"]);
         let _ = std::fs::remove_file(&path);
     }
 

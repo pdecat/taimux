@@ -54,6 +54,13 @@ export XDG_RUNTIME_DIR="$TMP/run"
 export TAIMUX_SEARCH=0
 export TAIMUX_SESSIONS=0
 
+# And the picker's own daemon OFF, for the same reason as both of those: a
+# picker started by a test now starts one for itself, and every fixture that
+# drives `pick` would leave a process behind on the machine running the suite,
+# outliving the temp directory its socket sits in. The section that tests the
+# autostart turns it back on for its own pickers, and stops what it starts.
+export TAIMUX_DAEMON=0
+
 PASS=0; FAIL=0
 ok() { PASS=$((PASS+1)); printf '  \033[32mok\033[0m   %s\n' "$1"; }
 no() { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m %s\n       %s\n' "$1" "$2"; }
@@ -1265,6 +1272,70 @@ else
 
   ntmux kill-server 2>/dev/null
   pkill -f "$NT/bin/claude" 2>/dev/null
+fi
+
+# ============================================================================
+section "the picker starts a daemon for itself"
+# ============================================================================
+# Nothing else does. There is no unit file and no installer step, so for as long
+# as starting one was a thing to remember, nobody had one running and the
+# memoisation it exists for was never reached. The picker starts it the way
+# atuin's client starts its own: on finding nobody to ask, in the background,
+# for the refreshes after this one.
+#
+# Driven through `pick` in a real pane, because that is the only entry point
+# that does it: `tui` is the spike, and a daemon started by the test harness
+# would prove nothing about the picker.
+DSOCK="taimux-daemontest-$$"
+dtmux() { tmux -f /dev/null -L "$DSOCK" "$@"; }
+if [ ! -x "$KBIN" ]; then
+  skip "the picker's daemon (no taimux built; run just build)"
+elif ! command -v tmux >/dev/null 2>&1; then
+  skip "the picker's daemon (no tmux here to drive it in)"
+else
+  DT="$TMP/daemon-autostart"; mkdir -p "$DT/run" "$DT/bin"
+  cp "${BASH:-/bin/bash}" "$DT/bin/claude"
+  DSOCKPATH="$DT/sock"
+  dpick() {   # $1 = anything extra to set, e.g. TAIMUX_DAEMON=0
+    dtmux new-window -t dmn -c "$DT" \
+      "TAIMUX_SEARCH=0 TAIMUX_SESSIONS=0 TAIMUX_REMOTE=0 TAIMUX_SOCKET=$DSOCKPATH $1 \
+       XDG_RUNTIME_DIR=$DT/run $KBIN pick" 2>/dev/null
+  }
+  dwait() {   # a socket that is actually answered on, not just a file
+    local n=0
+    while [ "$n" -lt 100 ]; do
+      [ -S "$DSOCKPATH" ] && [ "$(TAIMUX_SOCKET=$DSOCKPATH "$KBIN" ping 2>/dev/null)" = "pong" ] && return 0
+      n=$((n+1)); sleep 0.05
+    done
+    return 1
+  }
+
+  dtmux new-session -d -s dmn -x 100 -y 24 -c "$DT" \
+    "$DT/bin/claude -c 'while :; do sleep 1; done'" 2>/dev/null
+
+  # Off first, so the assertion that it starts one is about the picker and not
+  # about something else on the machine having left a socket lying around.
+  dpick "TAIMUX_DAEMON=0"
+  sleep 2
+  r=0; [ -S "$DSOCKPATH" ] && r=1
+  eq "TAIMUX_DAEMON=0 starts nothing"        "0" "$r"
+
+  dpick "TAIMUX_DAEMON=1"
+  if dwait; then
+    ok "the picker starts one when there is none"
+  else
+    no "the picker starts one when there is none" "no daemon answered on $DSOCKPATH"
+  fi
+  dtmux kill-server 2>/dev/null
+  pkill -f "$DT/bin/claude" 2>/dev/null
+  # Stopped with the word rather than with a signal, which is both how a daemon
+  # is meant to be stopped and what a picker sends one from another build, so
+  # the test that cleans up after itself is the test of that path.
+  eq "…and the quit word stops it"           "bye" \
+     "$(TAIMUX_SOCKET=$DSOCKPATH "$KBIN" quit 2>/dev/null)"
+  sleep 0.5
+  r=0; TAIMUX_SOCKET=$DSOCKPATH "$KBIN" ping >/dev/null 2>&1 && r=1
+  eq "…and nothing answers after it"         "0" "$r"
 fi
 
 # ============================================================================

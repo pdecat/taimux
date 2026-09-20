@@ -400,6 +400,29 @@ fn switch(id: &str) -> i32 {
     }
 }
 
+/// Run one of our own subcommands in the background, outliving this process.
+///
+/// `setsid` so it leaves the picker's process group and its session: a popup
+/// closing must not take the child with it. Falling back to a plain spawn where
+/// there is no `setsid`, which is worse (the child dies with the group) but is
+/// still better than not starting it.
+///
+/// **All three streams**, stdin included. A spawned child inherits the picker's
+/// stdin unless told otherwise, and in a popup that is the terminal: the child
+/// then holds the pty open after the picker has gone, and a popup that closes to
+/// reopen itself at a new size never comes back. Found exactly that way, by the
+/// resize test going red the moment the picker gained a child to start.
+fn detach(exe: &str, arg: &str) {
+    let quiet = |c: &mut Command| -> std::io::Result<std::process::Child> {
+        c.stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+    };
+    let _ = quiet(Command::new("setsid").arg(exe).arg(arg))
+        .or_else(|_| quiet(Command::new(exe).arg(arg)));
+}
+
 /// The picker: resolve the pane it was opened from, fire the indexer behind it,
 /// draw, and act on the answer.
 ///
@@ -451,34 +474,41 @@ fn pick() -> i32 {
     let search = taimux_core::env::on("TAIMUX_SEARCH");
     let sessions = taimux_core::env::on("TAIMUX_SESSIONS");
     if search || sessions {
-        let exe = self_exe();
-        let _ = Command::new("setsid")
-            .arg(&exe)
-            .arg("index")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .or_else(|_| {
-                Command::new(&exe)
-                    .arg("index")
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn()
-            });
+        detach(&self_exe(), "index");
     }
 
     let home = std::env::var("HOME").unwrap_or_default();
     let exe = self_exe();
+    // Started at most once per picker, however many refreshes it runs: the flag
+    // is what stops a picker that cannot start one (no `setsid`, a read-only
+    // runtime directory) from trying again every second for as long as it is
+    // open.
+    let started = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let daemon_exe = exe.clone();
     let src = taimux_cli::tui::Source {
         fetch: std::sync::Arc::new(move || {
             // A daemon when one is listening, and the same work in process when
-            // none is, which is the normal state. Asked on every refresh rather
-            // than once, so one started (or stopped, or replaced by a newer
-            // build) while the picker is open is picked up at the next tick.
+            // none is. Asked on every refresh rather than once, so one started
+            // (or stopped, or replaced by a newer build) while the picker is
+            // open is picked up at the next tick.
             //
             // Only the LOCAL rows: the other hosts are reached over ssh and
             // cached by `all_panes`, and a daemon here knows nothing about them.
             let local = taimux_daemon::protocol::rows().unwrap_or_else(|| {
+                // Nobody worth asking, so start one for the ticks after this,
+                // the way atuin's client starts its own daemon rather than
+                // asking for a service file. It costs nothing to be wrong: the
+                // daemon exits by itself after five idle minutes, and a second
+                // one racing this finds the socket bound and stands down.
+                //
+                // This tick still does the work here. The child cannot be up in
+                // time for it, and waiting on one would put the picker's first
+                // frame behind a process start.
+                if taimux_core::env::on("TAIMUX_DAEMON")
+                    && !started.swap(true, std::sync::atomic::Ordering::SeqCst)
+                {
+                    detach(&daemon_exe, "serve");
+                }
                 let mut p = taimux_core::version::Prober::new();
                 let mut c = HashMap::new();
                 taimux_core::panes::list_rows(&mut p, &mut c)
@@ -699,7 +729,11 @@ fn main() {
                 eprintln!("taimux: {}", e);
                 1
             }),
-        "panes" | "ping" => taimux_daemon::protocol::query(&arg).map(|_| 0).unwrap_or(1),
+        // `quit` rides here with the other two because it IS one of them: a word
+        // sent to whatever is listening, printing what it answers. It is how a
+        // daemon is stopped without going looking for its pid, and it exits 1
+        // where there was nothing to stop.
+        "panes" | "ping" | "quit" => taimux_daemon::protocol::query(&arg).map(|_| 0).unwrap_or(1),
         // **The wire format another host answers with over ssh**, so it has to
         // work with nothing else running: a host is not required to have a
         // daemon up, and for most of them none ever will be.

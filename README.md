@@ -1363,14 +1363,22 @@ does not link the terminal stack" used to be a claim in a comment; now
 `cargo tree -p taimux-daemon` prints two lines and nothing can quietly add a
 third.
 
-A long-lived server is still optional and still worth it when several pickers are
-open at once, because it caches the `capture-pane` per pane across the clients
-asking within one refresh tick:
+**The picker starts one for itself**, the way atuin's client starts its own
+daemon rather than asking you for a service file: on finding nobody listening it
+spawns `taimux serve` in the background and does that refresh's work in process,
+so the daemon is there from the next tick on. It goes away by itself after five
+idle minutes, which means one exists while you are using the picker and nothing
+is resident when you are not. `TAIMUX_DAEMON=0` turns that off, and
+`taimux serve` still starts one by hand.
 
 ```sh
-just build
-target/release/taimux serve &      # optional
+taimux ping        # is one listening?
+taimux quit        # stop it; a picker sends this to a daemon of another build
 ```
+
+There is no unit file and nothing to install, which is the point: for as long as
+running one was a thing to remember, nobody had one and the memoisation it
+exists for was never reached.
 
 **What it is worth, measured here on 35 panes**, since the numbers below this are
 from the bash era and no longer say anything about when to run one:
@@ -1398,7 +1406,13 @@ of its own: a daemon left listening by the previous build answers rows that are
 still perfectly well-formed, just made by the code that shipped before. So the
 request the picker uses (`rows`) answers with the daemon's own version on the
 first line, and a daemon too old to know the word answers the protocol's
-`!unknown request`, which is the same refusal. **The turn-boundary hook
+`!unknown request`, which is the same refusal.
+
+Refusing it is not enough on its own, and this is the half that is easy to miss:
+being *asked* is what keeps a daemon from being idle, so a picker that merely
+ignored the old build would keep it alive for as long as it ran, and the one it
+started could never have the socket. So a refusal also sends `quit`, and the
+next refresh finds nobody listening and starts the current build. **The turn-boundary hook
 deliberately does not use the socket at all**: the work is local and stateless
 (parse a small payload, walk a few `/proc` entries, write one line), so a round
 trip would add latency and a second failure mode and buy nothing, and it has to
