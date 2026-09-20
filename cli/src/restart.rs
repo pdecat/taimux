@@ -144,6 +144,175 @@ pub fn screen_has_no_draft(screen: &str) -> Result<(), String> {
     }
 }
 
+/// The rows claude needs before it draws its prompt box at all.
+///
+/// Measured against 2.1.278 in a tmux server of its own, a row at a time: at six
+/// the `❯` is on screen and whatever has been typed into it with it, at five the
+/// last row is the box's own top rule and neither the glyph nor the draft is
+/// anywhere on the pane, and by three nothing of the box survives. Width does not
+/// move it, 46, 54, 63, 80 and 213 columns all break in the same place.
+///
+/// A pane under it is not a pane in a strange state, it is a pane that cannot be
+/// READ: the box, an unsent draft inside it and a dialog over it go off the
+/// bottom together, so `screen_has_no_draft` refuses it and would go on refusing
+/// it for as long as the pane stays that size. Nine of the fourteen outdated
+/// panes on this machine were exactly that, which is how a sweep meant to clear
+/// the outdated list offered to clear four of them.
+const BOX_ROWS: usize = 6;
+
+/// One tmux command line, as the arguments it is made of.
+type Cmd = Vec<String>;
+
+/// Getting a pane to a readable size, and putting the window back after.
+type ZoomSteps = (Vec<Cmd>, Vec<Cmd>);
+
+/// What it takes to read a pane at a size claude will draw on, and what it takes
+/// to put the window back afterwards.
+///
+/// Split out from the running of it so the ORDER can be tested without a tmux to
+/// run it against, the order being the whole of the difficulty. `None` when there
+/// is nothing to gain: a pane already tall enough, or a window no taller than the
+/// pane it holds, where zooming would hand it the rows it already has.
+///
+/// **Zoom rather than `resize-pane -y`**, and only a crowded window shows why:
+/// seven panes in seventeen rows share eleven rows of content, six of which are
+/// already spoken for by the others, so the tallest any one of them can be made
+/// is five, one short of what the box needs. Zoom is the only growth that does
+/// not have to come out of a sibling. It also leaves the LAYOUT untouched, so
+/// putting the window back is a matter of the zoom flag and the active pane
+/// rather than of replaying a layout string and hoping it lands.
+fn zoom_steps(
+    pane: &str,
+    zoomed: bool,
+    pane_rows: usize,
+    window_rows: usize,
+    active: &str,
+    last: &str,
+) -> Option<ZoomSteps> {
+    if pane_rows >= BOX_ROWS || window_rows < BOX_ROWS || window_rows <= pane_rows {
+        return None;
+    }
+    let cmd = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Cmd>();
+
+    let mut go = Vec::new();
+    // `-Z` toggles the WINDOW's zoom whatever pane it is pointed at, so on a
+    // window that arrives zoomed the first one only ever switches the OTHER pane
+    // off, and a second is what zooms this one. Two identical command lines in a
+    // row is not a duplicated push.
+    if zoomed {
+        go.push(cmd(&["resize-pane", "-Z", "-t", pane]));
+    }
+    go.push(cmd(&["resize-pane", "-Z", "-t", pane]));
+
+    let mut back = vec![cmd(&["resize-pane", "-Z", "-t", pane])];
+    // Zooming made this pane the active one and pushed whatever was active into
+    // the window's "last pane", so both have to go back, and in that order:
+    // selecting the old last pane first leaves the old active one current with
+    // the right pane behind it. `prefix + ;` is the user's binding, not taimux's
+    // to spend. A pane that was active already has neither to restore.
+    if active != pane {
+        if !last.is_empty() && last != pane {
+            back.push(cmd(&["select-pane", "-t", last]));
+        }
+        if !active.is_empty() {
+            back.push(cmd(&["select-pane", "-t", active]));
+        }
+    }
+    // A window that arrives zoomed is zoomed on its active pane by definition,
+    // which is why that pane is never this one: it would have the window's full
+    // height and be refused above.
+    if zoomed && !active.is_empty() {
+        back.push(cmd(&["resize-pane", "-Z", "-t", active]));
+    }
+    Some((go, back))
+}
+
+/// The commands that put the window back, run when this goes out of scope.
+///
+/// A guard rather than a line at the end of the function because the read
+/// between the two can panic, and a window left zoomed on a pane nobody chose is
+/// a worse outcome than a pane left unread.
+struct Restoring(Vec<Cmd>);
+
+impl Drop for Restoring {
+    fn drop(&mut self) {
+        for c in &self.0 {
+            tmux::run(&c.iter().map(String::as_str).collect::<Vec<_>>());
+        }
+    }
+}
+
+/// One pane's screen, read at a size claude will draw its prompt box on.
+///
+/// `None` when the pane did not need it or the window cannot give it, in which
+/// case nothing was touched and the screen already in hand is the best there is.
+///
+/// The wait is not padding. claude redraws on the SIGWINCH and does it fast,
+/// measured at 13 to 16ms across six runs with the draft already in the first
+/// readable frame, but a capture taken with no wait at all comes back with no box
+/// at all: tmux does not reflow an old frame into the new rows, it hands over
+/// what is there and claude fills it a moment later. So the poll is what makes
+/// the read real, and its ceiling is thirty times the measurement rather than a
+/// guess at it.
+pub fn capture_zoomed(pane: &str) -> Option<String> {
+    if !taimux_core::env::on("TAIMUX_ZOOM_TO_READ") {
+        return None;
+    }
+    let geom = tmux::ask(&[
+        "display-message",
+        "-p",
+        "-t",
+        pane,
+        "-F",
+        "#{window_zoomed_flag}\t#{pane_height}\t#{window_height}\t#{window_id}",
+    ])?;
+    let g: Vec<&str> = geom.trim_end().split('\t').collect();
+    if g.len() < 4 {
+        return None;
+    }
+    let (zoomed, win) = (g[0] == "1", g[3]);
+    let pane_rows: usize = g[1].parse().ok()?;
+    let window_rows: usize = g[2].parse().ok()?;
+
+    let mut active = String::new();
+    let mut last = String::new();
+    for l in tmux::ask(&[
+        "list-panes",
+        "-t",
+        win,
+        "-F",
+        "#{pane_id}\t#{pane_active}\t#{pane_last}",
+    ])?
+    .lines()
+    {
+        let c: Vec<&str> = l.split('\t').collect();
+        if c.len() < 3 {
+            continue;
+        }
+        if c[1] == "1" {
+            active = c[0].to_string();
+        }
+        if c[2] == "1" {
+            last = c[0].to_string();
+        }
+    }
+
+    let (go, back) = zoom_steps(pane, zoomed, pane_rows, window_rows, &active, &last)?;
+    for c in &go {
+        tmux::run(&c.iter().map(String::as_str).collect::<Vec<_>>());
+    }
+    let _restore = Restoring(back);
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+    loop {
+        let screen = tmux::capture(pane).unwrap_or_default();
+        if screen.contains('❯') || std::time::Instant::now() >= deadline {
+            return Some(screen);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 /// The version a running process is executing, read from its own `/proc/exe`
 /// rather than from the binary on `$PATH`: a long-lived session goes on running
 /// the release it started under.
@@ -188,6 +357,15 @@ pub struct Opts {
 /// fixtures as well as against a live machine.
 pub trait Env {
     fn capture(&self, pane: &str) -> String;
+    /// The same pane read at a size claude will draw its prompt box on, for the
+    /// one that is too short to show one at the size it is.
+    ///
+    /// `None` by default, and for every fixture: a screen handed over by a test
+    /// is already the screen that test means, and only the live implementation
+    /// has a window to zoom.
+    fn capture_zoomed(&self, _pane: &str) -> Option<String> {
+        None
+    }
     fn hook_state(&self, pane: &str, pid: i32) -> Option<String>;
     fn version_of_pid(&self, pid: i32) -> Option<String>;
     fn cwd_of(&self, pid: i32) -> Option<String>;
@@ -253,7 +431,20 @@ pub fn plan(
             continue;
         }
 
-        let screen = e.capture(id);
+        let mut screen = e.capture(id);
+        // A screen with no prompt box on it is either a session doing something
+        // unusual or a pane too short to draw one, and those want opposite
+        // answers: the first is a refusal, the second is a measurement that has
+        // not been taken yet. Taking it costs the window a zoom for the
+        // milliseconds claude needs to redraw, and buys a reading of the box, of
+        // anything typed into it and of any dialog over it, none of which is on
+        // the pane at the size it sits at. It happens here rather than after the
+        // state check on purpose: `merge` is reading the same blank screen.
+        if !screen.contains('❯') {
+            if let Some(bigger) = e.capture_zoomed(id) {
+                screen = bigger;
+            }
+        }
         let st = state::merge(&screen, e.hook_state(id, pid).as_deref());
         if st.as_str() != "idle" && !o.include_busy {
             p.skipped.push(format!(
@@ -433,6 +624,9 @@ impl Env for Live {
     fn capture(&self, pane: &str) -> String {
         tmux::ask_raw(&["capture-pane", "-p", "-t", pane]).unwrap_or_default()
     }
+    fn capture_zoomed(&self, pane: &str) -> Option<String> {
+        capture_zoomed(pane)
+    }
     fn hook_state(&self, pane: &str, pid: i32) -> Option<String> {
         taimux_core::hook::hook_state_of(pane, pid)
     }
@@ -587,6 +781,68 @@ mod tests {
             screen_has_no_draft("stuff\n❯ half a thought\n"),
             Err("unsent text in the prompt box".into())
         );
+    }
+
+    /// The four rows a pane has to be given before any of this can be asked of
+    /// it, and the two it can be left at.
+    #[test]
+    fn a_pane_tall_enough_to_read_is_left_alone() {
+        // already showing its box: nothing to gain, and nothing touched
+        assert!(zoom_steps("%1", false, 6, 40, "%2", "%3").is_none());
+        assert!(zoom_steps("%1", false, 40, 40, "%2", "%3").is_none());
+        // a window no taller than the pane has no rows to lend it
+        assert!(zoom_steps("%1", false, 3, 3, "%2", "%3").is_none());
+        assert!(zoom_steps("%1", false, 3, 5, "%2", "%3").is_none());
+    }
+
+    /// The common shape: a three-row pane in a window nobody has zoomed. One
+    /// zoom out and back, and the pane that was active is active again with the
+    /// pane that was behind it still behind it.
+    #[test]
+    fn a_short_pane_is_zoomed_and_the_selection_put_back() {
+        let (go, back) = zoom_steps("%1", false, 3, 17, "%2", "%3").unwrap();
+        assert_eq!(go, vec![vec!["resize-pane", "-Z", "-t", "%1"]]);
+        assert_eq!(
+            back,
+            vec![
+                vec!["resize-pane", "-Z", "-t", "%1"],
+                vec!["select-pane", "-t", "%3"],
+                vec!["select-pane", "-t", "%2"],
+            ]
+        );
+    }
+
+    /// A window that arrives zoomed on another pane takes TWO `-Z` to zoom this
+    /// one, because the first is spent switching the other one off, and it is
+    /// owed a re-zoom at the end.
+    #[test]
+    fn a_window_zoomed_elsewhere_is_handed_back_zoomed() {
+        let (go, back) = zoom_steps("%1", true, 3, 17, "%2", "%3").unwrap();
+        assert_eq!(
+            go,
+            vec![
+                vec!["resize-pane", "-Z", "-t", "%1"],
+                vec!["resize-pane", "-Z", "-t", "%1"],
+            ]
+        );
+        assert_eq!(
+            back,
+            vec![
+                vec!["resize-pane", "-Z", "-t", "%1"],
+                vec!["select-pane", "-t", "%3"],
+                vec!["select-pane", "-t", "%2"],
+                vec!["resize-pane", "-Z", "-t", "%2"],
+            ]
+        );
+    }
+
+    /// Zooming the pane that is already active changes no selection, so putting
+    /// one back would be the only thing that moved it.
+    #[test]
+    fn an_active_short_pane_has_no_selection_to_restore() {
+        let (go, back) = zoom_steps("%1", false, 3, 17, "%1", "%3").unwrap();
+        assert_eq!(go.len(), 1);
+        assert_eq!(back, vec![vec!["resize-pane", "-Z", "-t", "%1"]]);
     }
 
     /// No box at all means the screen is not what it is expected to be, and that
@@ -886,6 +1142,12 @@ mod plan_tests {
         screens: HashMap<String, String>,
         /// pane -> resolved transcript, or the refusal
         resolved: HashMap<String, Result<String, String>>,
+        /// pane -> what the same pane shows once it has been zoomed, for a pane
+        /// too short to draw a prompt box at the size it sits at
+        zoomed: HashMap<String, String>,
+        /// how many panes were zoomed to be read, since a zoom is something the
+        /// user watching that window sees happen
+        zooms: std::cell::Cell<usize>,
         transcript: String,
         now: i64,
     }
@@ -893,6 +1155,13 @@ mod plan_tests {
     impl Env for Fake {
         fn capture(&self, pane: &str) -> String {
             self.screens.get(pane).cloned().unwrap_or_default()
+        }
+        fn capture_zoomed(&self, pane: &str) -> Option<String> {
+            let bigger = self.zoomed.get(pane).cloned();
+            if bigger.is_some() {
+                self.zooms.set(self.zooms.get() + 1);
+            }
+            bigger
         }
         fn hook_state(&self, _pane: &str, _pid: i32) -> Option<String> {
             None
@@ -934,6 +1203,8 @@ mod plan_tests {
             vers,
             screens,
             resolved,
+            zoomed: HashMap::new(),
+            zooms: std::cell::Cell::new(0),
             transcript: r#"{"type":"user","timestamp":"2020-01-01T00:00:00Z"}"#.to_string(),
             now: 1788312225,
         }
@@ -1029,6 +1300,69 @@ mod plan_tests {
             .insert("%1".into(), "output\n❯ half a thought\n".into());
         let p = plan_of(&e, &opts());
         assert!(p.skipped[0].contains("unsent text in the prompt box"));
+    }
+
+    /// The pane this whole thing is for: three rows, no box on it, and a session
+    /// sitting idle behind that. Read at a size it can be read at, it is an
+    /// ordinary restart.
+    #[test]
+    fn a_pane_too_short_for_its_box_is_read_zoomed() {
+        let mut e = fake();
+        e.screens.insert(
+            "%1".into(),
+            "  current: 2.1.100 · latest…\n────────\n".into(),
+        );
+        e.zoomed.insert("%1".into(), "some output\n❯ \n".into());
+        let p = plan_of(&e, &opts());
+        assert_eq!(e.zooms.get(), 1);
+        assert_eq!(p.go.len(), 1);
+        assert_eq!(p.go[0].pane, "%1");
+        assert!(p.skipped.is_empty());
+    }
+
+    /// And the point of reading it rather than assuming: a draft is invisible at
+    /// three rows too, so the zoomed read is the only thing that can find one.
+    /// Refused here for what is actually in the box, not for the box being
+    /// missing.
+    #[test]
+    fn a_draft_hidden_by_a_short_pane_still_refuses() {
+        let mut e = fake();
+        e.screens
+            .insert("%1".into(), "  current: 2.1.100…\n".into());
+        e.zoomed
+            .insert("%1".into(), "output\n❯ half a thought\n".into());
+        let p = plan_of(&e, &opts());
+        assert_eq!(e.zooms.get(), 1);
+        assert!(p.go.is_empty());
+        assert!(p.skipped[0].contains("unsent text in the prompt box"));
+    }
+
+    /// A dialog is off the bottom of a short pane with the box, so the zoomed
+    /// read is what finds that too, and a dialog is refused with or without
+    /// `--include-busy`.
+    #[test]
+    fn a_dialog_hidden_by_a_short_pane_is_found_by_the_zoom() {
+        let mut e = fake();
+        e.screens.insert("%1".into(), "  Bash command\n".into());
+        e.zoomed.insert(
+            "%1".into(),
+            "Do you want to proceed?\n❯ 1. Yes\n  2. No\n".into(),
+        );
+        let mut o = opts();
+        o.include_busy = true;
+        let p = plan_of(&e, &o);
+        assert!(p.go.is_empty());
+        assert!(p.skipped[0].contains("a dialog is waiting for an answer"));
+    }
+
+    /// A pane already showing its box is never zoomed: the read is already good,
+    /// and a zoom is something the person watching that window sees happen.
+    #[test]
+    fn a_pane_that_shows_its_box_is_not_zoomed() {
+        let e = fake();
+        let p = plan_of(&e, &opts());
+        assert_eq!(e.zooms.get(), 0);
+        assert_eq!(p.go.len(), 1);
     }
 
     /// A transcript touched in the last 45 seconds is left alone whatever the

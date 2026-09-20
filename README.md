@@ -71,6 +71,7 @@ ones. Same pane scan, same reading of what each session is doing. See
 - [Sessions on other hosts](#sessions-on-other-hosts)
 - [Putting a Claude Code session back](#putting-a-claude-code-session-back)
   - [`taimux restart`](#taimux-restart)
+  - [A pane too short to read](#a-pane-too-short-to-read)
   - [`taimux resurrect`](#taimux-resurrect)
   - [`taimux print-cmds`](#taimux-print-cmds)
 - [How detection works](#how-detection-works)
@@ -516,7 +517,11 @@ that stops being rewritten at `run` or `input` folds into "working" either way:
 the pane then reads as working forever and a plain `Ctrl-x` declines it forever.
 Found in the wild on a line **38 hours stale**, against a session that was plainly
 idle (0.8% CPU, 35 minutes of CPU across nearly three days), in a pane too small to
-render its prompt box and so beyond rescue by reading the screen.
+render its prompt box. That last part is no longer the wall it was: a pane too
+short to draw a box is now [read at a size it can be read
+at](#a-pane-too-short-to-read), and a screen positively showing an idle box is
+what overrules a stale line. The escalation is for what the screen cannot settle
+either way.
 
 That one was a granted permission, which `PostToolUse` closes now. What has no
 closing event at all is an **interrupted** turn: `Esc` fires nothing, checked with
@@ -812,7 +817,8 @@ so the two can never disagree.
 
 Left open, it **empties itself**: a row you press `Ctrl-x` on stays put, marked
 `↻`, until the session comes back on the installed version and drops out of the
-list. `F8` clears the whole of it in one go, after showing you the plan.
+list. `F8` clears the whole of it in one go, after showing you the plan, a pane
+[too short to be read](#a-pane-too-short-to-read) included.
 
 The stop is not in the cycle at all where nothing is installed to compare a
 version against (no launcher under `~/.local/share/claude/versions/`, or
@@ -1207,6 +1213,35 @@ unsent, and its transcript has been quiet for 45s.
 The dialog check is **never** skipped, `--include-busy` or not: an `Enter` sent to
 a pane showing a permission prompt picks its highlighted option and approves a
 tool call nobody approved.
+
+### A pane too short to read
+
+Every one of those readings is of a *screen*, and a pane can be too small to have
+one. claude needs **six rows** before it draws its prompt box at all: measured a
+row at a time against 2.1.278, at six the `❯` is there and whatever has been typed
+into it with it, at five the last row is the box's own top rule and neither the
+glyph nor the draft is anywhere on the pane, and by three nothing of the box
+survives. Width does not move it, 46 columns through 213 all break in the same
+place.
+
+That is not a session in a strange state, it is a measurement that has not been
+taken: the box, an unsent draft inside it and a dialog over it go off the bottom
+together, so a plain read of such a pane says nothing about any of the three. It
+was skipped as `no prompt box on screen`, and it would have gone on being skipped
+for as long as the pane stayed that size. On the machine this was written on that
+was **nine of the fourteen** panes a sweep was meant to clear.
+
+So a pane under six rows is **zoomed for the few milliseconds claude takes to
+redraw**, read there, and the window put straight back: same zoom flag, same
+active pane, same pane behind it in `prefix + ;`, and the layout never touched at
+all. Zoom rather than a resize because it is the only growth that does not come
+out of a sibling, and a window with seven panes in seventeen rows can spare no
+single one of them more than five. The read costs about 15ms, and a capture taken
+with no wait at all comes back with no box on it, so the wait is what makes the
+read real rather than padding.
+
+`TAIMUX_ZOOM_TO_READ=0` turns it off, and takes those panes back to being skipped
+unread.
 
 Also `--update` (run `claude update` first), `--pane %id` (repeatable) and
 `--transcript PATH` for a pane you have identified yourself.

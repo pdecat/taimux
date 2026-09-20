@@ -1435,6 +1435,100 @@ OFEED
 fi
 
 # ============================================================================
+section "a pane too short to draw a prompt box is read zoomed"
+# ============================================================================
+# Reported 2026-09-20: F8 offered to restart 4 of the 14 outdated panes on the
+# machine, and nine of the ten it skipped said `no prompt box on screen`. Every
+# one of those nine was a pane one to five rows tall. claude needs six before it
+# draws the box at all, and under that the box, anything typed into it and any
+# dialog over it go off the bottom together, so the refusal was not a reading of
+# the session: it was the absence of one, and it would have held forever.
+#
+# The plan zooms such a pane for the few milliseconds claude takes to redraw,
+# reads it, and puts the window back. The decision that follows is unit-tested
+# against fixtures; what only an end-to-end run can check is the tmux the live
+# one issues, and in particular the putting back, because the zoom leaves this
+# pane active with the previously active one pushed into "last pane" and both
+# have to go back.
+#
+# The stale session is a copy of `sleep` under the fixture's own versions
+# directory, run in a pane of a real tmux: `plan` asks /proc what a pane's
+# foreground process is executing, so the one thing that cannot be faked is a
+# real process on a real pty.
+ZBIN="$HERE/../target/release/taimux"
+ZSOCK="taimux-zoomtest-$$"
+ztmux() { tmux -f /dev/null -L "$ZSOCK" "$@"; }
+if [ ! -x "$ZBIN" ]; then
+  skip "the zoomed read (no taimux built; run just build)"
+elif ! command -v tmux >/dev/null 2>&1; then
+  skip "the zoomed read (no tmux here to host a pty)"
+else
+  ZH="$TMP/zoom"; mkdir -p "$ZH"; ZH="$(cd "$ZH" && pwd -P)"
+  ZVD="$ZH/.local/share/claude/versions"
+  mkdir -p "$ZVD/2.1.100" "$ZVD/2.1.300" "$ZH/.local/bin" "$ZH/run" "$ZH/ft"
+  # bash rather than the obvious `sleep`: coreutils ships as one multi-call
+  # binary that dispatches on argv[0], so a copy of it named `claude` exits with
+  # `unknown program` and the pane is gone before it can be scanned.
+  cp "$(command -v bash)" "$ZVD/2.1.100/claude"
+  cp "$(command -v bash)" "$ZVD/2.1.300/claude"
+  ln -sf "$ZVD/2.1.300/claude" "$ZH/.local/bin/claude"
+  ztmux new-session -d -x 80 -y 24 "exec '$ZVD/2.1.100/claude' -c 'read -r _'" 2>/dev/null
+  ZTTY=""; zn=0
+  while [ "$zn" -lt 40 ]; do
+    ZTTY="$(ztmux display -p '#{pane_tty}' 2>/dev/null)"
+    case "$(ztmux display -p '#{pane_current_command}' 2>/dev/null)" in
+      claude) break ;;
+    esac
+    zn=$((zn+1)); sleep 0.05
+  done
+
+  # The pane is three rows and shows no box, until it is zoomed: then it shows a
+  # turn in flight, which is what the small screen could not say either way.
+  cat > "$ZH/ft/tmux" <<'ZFAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TMUXLOG"
+case "$*" in
+  *"#{pane_tty}"*)           printf '%s\t%%01\tz:1.1\t%s\tclaude\tproj: a short pane\n' "$ZTTY" "$ZCWD" ;;
+  *"#{window_zoomed_flag}"*) printf '0\t3\t24\t@0\n' ;;
+  *"#{pane_last}"*)          printf '%%01\t0\t0\n%%02\t1\t0\n%%03\t0\t1\n' ;;
+esac
+case "$1" in
+  capture-pane)
+    if [ -e "$ZFLAG" ]; then printf '%s\n' "✻ Twisting… (35s · ↓ 1.6k tokens)" "❯ "
+    else                     printf '%s\n' "  current: 2.1.100 · latest"; fi ;;
+  resize-pane) [ "$2" = "-Z" ] && touch "$ZFLAG" ;;
+esac
+exit 0
+ZFAKE
+  chmod +x "$ZH/ft/tmux"
+
+  ZLOG="$TMP/zoom-tmux.log"; : > "$ZLOG"; rm -f "$TMP/zoom-flag"
+  ZOUT="$(PATH="$ZH/ft:$PATH" TMUXLOG="$ZLOG" ZTTY="$ZTTY" ZCWD="$TMP" \
+          ZFLAG="$TMP/zoom-flag" HOME="$ZH" XDG_RUNTIME_DIR="$ZH/run" \
+          TAIMUX_REMOTE=0 "$ZBIN" restart -n 2>&1)"
+
+  has "the stale pane is found at all"        "$ZOUT" "2.1.100"
+  # Capture, zoom, capture again, unzoom, and put the selection back behind it.
+  eq  "the whole dance, in order"             "CZCZ%03%02" \
+      "$(awk '{ if ($1=="resize-pane") printf "Z";
+                else if ($1=="select-pane") printf "%s", $3;
+                else if ($1=="capture-pane") printf "C" }' "$ZLOG")"
+  # The three-row screen says nothing at all, so an unzoomed read would have
+  # called this idle and offered to restart a turn in flight.
+  has "the verdict comes from the zoomed read" "$ZOUT" "rerun when idle"
+
+  # And a pane already tall enough to show its box is never zoomed for it.
+  : > "$ZLOG"; touch "$TMP/zoom-flag"
+  PATH="$ZH/ft:$PATH" TMUXLOG="$ZLOG" ZTTY="$ZTTY" ZCWD="$TMP" \
+    ZFLAG="$TMP/zoom-flag" HOME="$ZH" XDG_RUNTIME_DIR="$ZH/run" \
+    TAIMUX_REMOTE=0 "$ZBIN" restart -n >/dev/null 2>&1
+  eq  "a readable pane is left where it is"   "0" "$(grep -c 'resize-pane' "$ZLOG")"
+
+  ztmux kill-server 2>/dev/null
+  rm -f "$TMP/zoom-flag"
+fi
+
+# ============================================================================
 section "a child that cannot start SAYS so, instead of flashing past"
 # ============================================================================
 # Reported 2026-09-09 as a blank popup after F8, with keys echoing into it.
