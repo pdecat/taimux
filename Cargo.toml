@@ -39,13 +39,13 @@ rust-version = "1.88"
 # generic updater rewrites the version on any line carrying the annotation, and
 # `extra-files` in release-please-config.json is what points it at this file.
 [workspace.dependencies]
-taimux-core = { path = "core", version = "0.12.0" } # x-release-please-version
-taimux-daemon = { path = "daemon", version = "0.12.0" } # x-release-please-version
-taimux-cli = { path = "cli", version = "0.12.0" } # x-release-please-version
+taimux-core = { path = "core", version = "0.13.0" } # x-release-please-version
+taimux-daemon = { path = "daemon", version = "0.13.0" } # x-release-please-version
+taimux-cli = { path = "cli", version = "0.13.0" } # x-release-please-version
 
 [package]
 name = "taimux"
-version = "0.12.0"
+version = "0.13.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
