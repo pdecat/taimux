@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0](https://github.com/pdecat/taimux/compare/v0.13.0...v0.14.0) (2026-09-20)
+
+
+### Features
+
+* refresh the list once a second, not once every three ([ae6eb59](https://github.com/pdecat/taimux/commit/ae6eb5989370102d151c16d24ffccd3fa24cbd36))
+* the picker asks a running daemon for its rows ([6ec5df4](https://github.com/pdecat/taimux/commit/6ec5df44b866c01201fa749beec4854e6e9aab08))
+
 ## [0.13.0](https://github.com/pdecat/taimux/compare/v0.12.0...v0.13.0) (2026-09-20)
 
 
