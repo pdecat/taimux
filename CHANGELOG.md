@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/pdecat/taimux/compare/v0.14.0...v0.15.0) (2026-09-20)
+
+
+### Features
+
+* the picker starts its own daemon, the way atuin does ([854c91a](https://github.com/pdecat/taimux/commit/854c91a7a4161060b243af3934046ce0f110a5ab))
+
 ## [0.14.0](https://github.com/pdecat/taimux/compare/v0.13.0...v0.14.0) (2026-09-20)
 
 
