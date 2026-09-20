@@ -795,10 +795,19 @@ if [ -x "$WBIN" ]; then
   if [ -S "$TAIMUX_SOCKET" ]; then
     eq "the daemon answers ping"               "pong" "$("$WBIN" ping 2>&1)"
     DOUT="$("$WBIN" list 2>&1)"
-    eq "…and its rows carry no blank line"     "0" "$(printf '%s\n' "$DOUT" | awk 'NF==0' | wc -l | tr -d ' ')"
+    # Both of these need a machine that HAS an agent pane, and a CI runner does
+    # not. `$(...)` strips the trailing newlines, so an empty answer and a
+    # one-blank-line answer are the same empty string by the time they get here,
+    # and the bug cannot show on a machine with nothing to list. Asserting it
+    # anyway is how this went red on CI and green on a workstation: `printf
+    # '%s\n' ""` still prints a line, which awk counts.
     if [ -n "$DOUT" ]; then
+      eq "…and its rows carry no blank line"   "0" \
+         "$(printf '%s\n' "$DOUT" | awk 'NF==0' | wc -l | tr -d ' ')"
       eq "…in the same eight fields"           "8" \
          "$(printf '%s' "$DOUT" | awk -F'\t' '{print NF; exit}')"
+    else
+      skip "no agent panes here to shape-check the daemon's answer"
     fi
     # The version refusal (a daemon left running by an older build answers rows
     # that look perfectly right) is driven in the crate's own tests, against a
