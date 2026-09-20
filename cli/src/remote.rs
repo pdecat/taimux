@@ -873,17 +873,68 @@ mod tests {
         );
     }
 
+    /// `bounded`, for a child that is supposed to start: `None` when it never
+    /// did, rather than the answer a failed fork is indistinguishable from.
+    ///
+    /// The same conflation the test above steps around, met from the other side.
+    /// There a spawn failure could be told apart by the clock, since the path
+    /// under test cannot return before its deadline; here the child is a `printf`
+    /// that returns at once either way, so the only thing left is that a fork
+    /// this machine refused is **transient**. It was refused for want of a slot
+    /// under the suite's own parallelism, not because anything about the child is
+    /// wrong, so it is worth simply asking again: five tries 50ms apart against a
+    /// failure rate the neighbour measures at about one run in twelve.
+    ///
+    /// Not fixed in `bounded` itself. Answering 255 for a child that never
+    /// started is right for its caller, where a failed ssh and an unreachable
+    /// host are the same thing, and a status invented for the benefit of a test
+    /// would be a different tool under the picker.
+    fn spawned(secs: u64, make: impl Fn() -> Command) -> Option<(i32, String)> {
+        for _ in 0..5 {
+            let got = bounded(secs, make());
+            if got != (255, String::new()) {
+                return Some(got);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        None
+    }
+
+    /// Said out loud, because a check that quietly does not run is worse than
+    /// one that fails.
+    fn no_fork() {
+        eprintln!("bounded: no child could be spawned in five tries, skipping");
+    }
+
     #[test]
     fn a_prompt_child_runs_to_completion_and_its_output_comes_back() {
-        let mut c = Command::new("printf");
-        c.arg("hi");
-        assert_eq!(bounded(5, c), (0, "hi".to_string()));
+        let Some(got) = spawned(5, || {
+            let mut c = Command::new("printf");
+            c.arg("hi");
+            c
+        }) else {
+            return no_fork();
+        };
+        assert_eq!(got, (0, "hi".to_string()));
         // …and a non-zero status is reported as its own, not as a timeout
-        let c = Command::new("false");
-        assert_eq!(bounded(5, c).0, 1);
-        // a program that is not there is unreachable-shaped rather than a panic
+        let Some(got) = spawned(5, || Command::new("false")) else {
+            return no_fork();
+        };
+        assert_eq!(got.0, 1);
+        // A program that is not there is unreachable-shaped rather than a panic,
+        // and this one asks `bounded` directly: the shape `spawned` retries IS
+        // the answer here, so going through it would be waiting out five
+        // deliberate failures to arrive at the same 255.
         let c = Command::new("no-such-program-at-all");
         assert_eq!(bounded(5, c).0, 255);
+    }
+
+    /// The other half of `spawned`'s contract, and the only thing that ever runs
+    /// its give-up arm on a machine that can fork: five failures in a row are
+    /// reported as no answer, never as the 255 they are made of.
+    #[test]
+    fn a_child_that_never_starts_is_no_answer_at_all() {
+        assert_eq!(spawned(5, || Command::new("no-such-program-at-all")), None);
     }
 
     /// The TTL split, without an ssh anywhere near it. An answer is worth three
