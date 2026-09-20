@@ -1365,8 +1365,33 @@ just build
 target/release/taimux serve &      # optional
 ```
 
+**What it is worth, measured here on 35 panes**, since the numbers below this are
+from the bash era and no longer say anything about when to run one:
+
+| | |
+|---|---|
+| a client that never asks | 80 ms |
+| through a daemon, inside one refresh tick | **15 ms** |
+| through a daemon, 3s apart, which is one picker on its own | 85 ms |
+
+So a single picker gains nothing: its refreshes are further apart than the
+capture cache lives, so the daemon re-captures exactly as the picker would have.
+What it saves is the second, third and fourth client in the same tick, which is
+two pickers open at once, or one picker plus the `taimux list` another host asks
+for over ssh.
+
+Before 2026-09-20 it was worse than not running one, 64 ms to 128 ms for the
+same answer, because the accept loop polled on a 50 ms sleep: the memoisation
+was going on the wait to be heard. Accept blocks on its own thread now.
+
 Every client falls back to doing the work itself when the socket is absent, the
-daemon refuses or it hangs, and all three have tests. **The turn-boundary hook
+daemon refuses, it hangs, or it is running a **different build** from the client
+asking, and all four have tests. That last one is the only one with no symptom
+of its own: a daemon left listening by the previous build answers rows that are
+still perfectly well-formed, just made by the code that shipped before. So the
+request the picker uses (`rows`) answers with the daemon's own version on the
+first line, and a daemon too old to know the word answers the protocol's
+`!unknown request`, which is the same refusal. **The turn-boundary hook
 deliberately does not use the socket at all**: the work is local and stateless
 (parse a small payload, walk a few `/proc` entries, write one line), so a round
 trip would add latency and a second failure mode and buy nothing, and it has to

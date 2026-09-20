@@ -471,9 +471,18 @@ fn pick() -> i32 {
     let exe = self_exe();
     let src = taimux_cli::tui::Source {
         fetch: std::sync::Arc::new(move || {
-            let mut p = taimux_core::version::Prober::new();
-            let mut c = HashMap::new();
-            let local = taimux_core::panes::list_rows(&mut p, &mut c);
+            // A daemon when one is listening, and the same work in process when
+            // none is, which is the normal state. Asked on every refresh rather
+            // than once, so one started (or stopped, or replaced by a newer
+            // build) while the picker is open is picked up at the next tick.
+            //
+            // Only the LOCAL rows: the other hosts are reached over ssh and
+            // cached by `all_panes`, and a daemon here knows nothing about them.
+            let local = taimux_daemon::protocol::rows().unwrap_or_else(|| {
+                let mut p = taimux_core::version::Prober::new();
+                let mut c = HashMap::new();
+                taimux_core::panes::list_rows(&mut p, &mut c)
+            });
             taimux_cli::remote::all_panes(&local, &taimux_cli::remote::tmux_pane_ttys())
         }),
         ended: taimux_cli::tui::ended_source(),
@@ -704,7 +713,7 @@ fn main() {
         // `list-local` is the same thing with the daemon never asked, which is
         // what the differentials and the golden replay want.
         "list" => {
-            match taimux_daemon::protocol::ask("list") {
+            match taimux_daemon::protocol::rows() {
                 Some(body) => print!("{}", body),
                 None => {
                     let mut p = taimux_core::version::Prober::new();
@@ -788,7 +797,7 @@ fn main() {
                         }
                     }
                     // Standalone, or the script refused: this server only.
-                    taimux_daemon::protocol::ask("list").unwrap_or_else(|| {
+                    taimux_daemon::protocol::rows().unwrap_or_else(|| {
                         let mut p = taimux_core::version::Prober::new();
                         let mut c = HashMap::new();
                         taimux_core::panes::list_rows(&mut p, &mut c)

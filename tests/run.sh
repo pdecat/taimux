@@ -780,6 +780,38 @@ if [ -x "$WBIN" ]; then
   # first when there is one.
   eq "list-local is the same answer, daemon or not" "$OUT" "$("$WBIN" list-local 2>&1)"
 
+  # …and now with one actually LISTENING, which is the half the assertions above
+  # cannot see: they point at a dead socket, so both sides of them take the
+  # in-process path and the socket's own answer is never read. It carried a
+  # trailing blank line for as long as it existed, a row of no fields handed to
+  # whatever parses the wire format, and nothing here could tell.
+  #
+  # The shape is asserted rather than the bytes: two scans taken ~100ms apart on
+  # a live machine legitimately differ the moment any session changes state,
+  # which would make a byte comparison flaky for a reason that is not a bug.
+  export TAIMUX_SOCKET="$TMP/live-socket"
+  "$WBIN" serve & DPID=$!
+  n=0; while [ "$n" -lt 40 ] && [ ! -S "$TAIMUX_SOCKET" ]; do n=$((n+1)); sleep 0.05; done
+  if [ -S "$TAIMUX_SOCKET" ]; then
+    eq "the daemon answers ping"               "pong" "$("$WBIN" ping 2>&1)"
+    DOUT="$("$WBIN" list 2>&1)"
+    eq "…and its rows carry no blank line"     "0" "$(printf '%s\n' "$DOUT" | awk 'NF==0' | wc -l | tr -d ' ')"
+    if [ -n "$DOUT" ]; then
+      eq "…in the same eight fields"           "8" \
+         "$(printf '%s' "$DOUT" | awk -F'\t' '{print NF; exit}')"
+    fi
+    # The version refusal (a daemon left running by an older build answers rows
+    # that look perfectly right) is driven in the crate's own tests, against a
+    # fake listener: the alternative here is keeping an old binary around to run.
+    kill "$DPID" 2>/dev/null; wait "$DPID" 2>/dev/null
+    rm -f "$TAIMUX_SOCKET"
+  else
+    kill "$DPID" 2>/dev/null
+    skip "a live daemon (the socket never appeared)"
+  fi
+  unset TAIMUX_SOCKET
+  export TAIMUX_SOCKET="$TMP/no-such-socket"
+
   # The SECOND wire format, and it failed the same silent way for longer.
   #
   # index_fetch asked every host for `_index --dump`, a bash-era name no Rust
@@ -793,8 +825,13 @@ if [ -x "$WBIN" ]; then
   eq "index-dump is a command the dispatcher answers" "0" "$r"
   r=0; "$WBIN" _index --dump >/dev/null 2>&1 || r=$?
   eq "…and the bash-era _index is refused, as it always was" "1" "$r"
+  # cli/, not daemon/: the file moved in the workspace split and this path was
+  # not followed, so `cat` failed and the assertion has been reading an EMPTY
+  # string ever since, which contains nothing and therefore passes whatever the
+  # code says. A test that cannot fail is worth less than no test, because it is
+  # counted.
   hasnt "…and nothing still sends the old name" \
-        "$(cat "$HERE/../daemon/src/remote.rs")" "_index --dump"
+        "$(cat "$HERE/../cli/src/remote.rs")" "_index --dump"
 
   unset TAIMUX_SOCKET
 else
