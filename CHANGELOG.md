@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.12.0](https://github.com/pdecat/taimux/compare/v0.11.1...v0.12.0) (2026-09-20)
+
+
+### Features
+
+* carry a conversation into a different agent ([afec72d](https://github.com/pdecat/taimux/commit/afec72d05b09521428d9d2c053fd5e8cea97ad2d))
+* list every agent's past conversations, not just claude's ([27bf638](https://github.com/pdecat/taimux/commit/27bf6387de78eb9d44410e6feb49c227593e4a9c))
+
+
+### Bug fixes
+
+* **ci:** the musl build needs a C compiler now, and a cache that knows it ([b5b80e0](https://github.com/pdecat/taimux/commit/b5b80e04a3965e0cd3b0fe48cba40df204e96311))
+* **just:** `ship` linked the launcher to itself and failed after landing ([c7cedd2](https://github.com/pdecat/taimux/commit/c7cedd27cd2177a13ea23162d223586e26c7b314))
+* **rows:** a summary too long for the window took the table with it ([36126a2](https://github.com/pdecat/taimux/commit/36126a27612ab382620db8be7925ed493ac5d127))
+
+
+### Performance
+
+* read a JSON string in one pass, not three over the line ([1752187](https://github.com/pdecat/taimux/commit/17521876266f4055f4545b9d13430f55e4cd1f14))
+* read the SQLite stores with rusqlite, not turso ([e87c094](https://github.com/pdecat/taimux/commit/e87c094b1bd83bc1844f8fd5e6a11937201165f9))
+
 ## [0.11.1](https://github.com/pdecat/taimux/compare/v0.11.0...v0.11.1) (2026-09-17)
 
 
