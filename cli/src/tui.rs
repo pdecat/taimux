@@ -27,6 +27,7 @@
 //! relied on to see the new label yet, and needs `--track --id-nth=2` so a reload
 //! does not drop the cursor. All of that is a field here.
 
+use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -173,6 +174,14 @@ pub struct Source {
     /// showing pane rows under the "past sessions" label while it arrived.
     pub ended: Option<Box<dyn Fn() -> String>>,
     pub cur: String,
+    /// Where the pane the picker was opened from IS, for the case where that
+    /// pane is not an agent session: `cur` then matches no row at all and these
+    /// are what the cursor is placed by instead. See `nearest`.
+    ///
+    /// Empty means "not known", which is what every entry point but `pick` hands
+    /// over, and the cursor then opens at the top of the list as it always did.
+    pub cur_cwd: String,
+    pub cur_target: String,
     pub home: String,
     pub newver: String,
     /// The taimux script, for the two keys that act rather than navigate. Unset
@@ -187,6 +196,95 @@ pub struct Source {
     pub popup: bool,
     /// What a previous instance was doing when the terminal grew under it.
     pub state: State,
+}
+
+/// Which row to open on when the pane the picker was opened from is not an agent
+/// session, and so is not in the list at all.
+///
+/// Pressed from a shell, `cur` matches nothing, and the cursor used to land on
+/// the top of the list: a row chosen by whichever session tmux happens to list
+/// first, which is to say by nothing. The question it should answer is "which of
+/// these sessions is the one I am working on", and the best evidence for that is
+/// the DIRECTORY. A shell in `~/projects/web` and an agent in `~/projects/web`
+/// are the same piece of work; one in `~/projects/web/docs` very nearly is; one
+/// in `~/notes` is not.
+///
+/// So the working directory is the primary key and the tmux list only breaks its
+/// ties, which is the case where two sessions are equally close to the directory
+/// and the nearer pane is the likelier one. Ties in BOTH keep the list's own
+/// order, since `min_by_key` takes the first of equal minimums.
+fn nearest(rows: &[&rows::Row], cwd: &str, target: &str) -> Option<usize> {
+    rows.iter()
+        .enumerate()
+        .min_by_key(|(_, r)| {
+            let (shared, apart) = cwd_near(cwd, &r.cwd);
+            (Reverse(shared), apart, tmux_near(target, r))
+        })
+        .map(|(i, _)| i)
+}
+
+/// Path components, ignoring the empties a leading, doubled or trailing slash
+/// leaves, so `/a/b`, `/a/b/` and `//a/b` are one directory rather than three.
+fn comps(p: &str) -> Vec<&str> {
+    p.split('/').filter(|c| !c.is_empty()).collect()
+}
+
+/// How near two directories are: how much of the path they share from the root,
+/// then how many steps apart they are through the deepest directory they have in
+/// common. The same directory is `(n, 0)`, a subdirectory of it `(n, 1)`, a
+/// sibling `(n-1, 2)`.
+///
+/// Both halves are load-bearing, and in that order. Shared components first, so
+/// a session one level DOWN from the directory you are in beats one a level up:
+/// the deeper of the two is the more specific answer, and the parent is often
+/// just where several unrelated projects happen to live. Then the distance, so
+/// the directory itself beats a subdirectory of it.
+///
+/// Nothing in common answers `(0, 0)` rather than `(0, distance)`: the paths
+/// diverge at their first component, so the directory says nothing about which
+/// row is nearer, and ranking on the distance alone would put whichever session
+/// sits closest to the root in front for a reason nobody could read off the
+/// screen. The tie then falls through to the tmux list, which is the honest
+/// answer. Same for an unknown directory on either side, which is empty and so
+/// shares nothing with anything.
+fn cwd_near(cur: &str, row: &str) -> (usize, usize) {
+    let (a, b) = (comps(cur), comps(row));
+    let shared = a.iter().zip(b.iter()).take_while(|(x, y)| x == y).count();
+    if shared == 0 {
+        return (0, 0);
+    }
+    (shared, (a.len() - shared) + (b.len() - shared))
+}
+
+/// How near a row's pane is to the pane the picker was opened from, in the list
+/// tmux itself keeps: the same session first, nearest window and then nearest
+/// pane inside it, then anything else on this server, then another host, whose
+/// panes are not in this server's list at all and whose window numbers mean
+/// nothing here.
+fn tmux_near(cur: &str, r: &rows::Row) -> (u8, usize, usize) {
+    /// Somewhere on this server, but not near anything: a different session, or
+    /// a row that names no pane (an ended session's label is its age).
+    const ELSEWHERE: (u8, usize, usize) = (1, 0, 0);
+    if !r.host.is_empty() {
+        return (2, 0, 0);
+    }
+    let (Some((sess, win, pane)), Some((rsess, rwin, rpane))) =
+        (target_parts(cur), target_parts(&r.target))
+    else {
+        return ELSEWHERE;
+    };
+    if sess != rsess {
+        return ELSEWHERE;
+    }
+    (0, win.abs_diff(rwin), pane.abs_diff(rpane))
+}
+
+/// `session:window.pane`, split into the three things it names, or `None` for
+/// anything that is not one.
+fn target_parts(t: &str) -> Option<(&str, usize, usize)> {
+    let (sess, rest) = t.split_once(':')?;
+    let (win, pane) = rest.split_once('.')?;
+    Some((sess, win.parse().ok()?, pane.parse().ok()?))
 }
 
 /// Throw away what ratatui thinks is on the terminal, so the next draw repaints
@@ -1240,9 +1338,31 @@ impl App {
     }
 
     /// Put the cursor on a pane, if it is in the list. Silent when it is not,
-    /// which is the case where there is nothing to put it on.
-    fn focus(&mut self, id: &str) {
-        if let Some(i) = self.view.iter().position(|&i| self.all[i].pane_id == id) {
+    /// which is the case where there is nothing to put it on, and `false` so the
+    /// one caller that HAS somewhere else to put it can.
+    fn focus(&mut self, id: &str) -> bool {
+        match self.view.iter().position(|&i| self.all[i].pane_id == id) {
+            Some(i) => {
+                self.sel = i;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Put the cursor on the row nearest the pane the picker was opened from,
+    /// for when that pane is not an agent session and so is not a row itself.
+    /// See `nearest` for what "nearest" is.
+    ///
+    /// Not knowing where that pane is means not knowing, so the cursor is left
+    /// where the rebuild put it (the top of the list) rather than moved on a
+    /// guess. That is what every entry point but `pick` gets.
+    fn focus_nearest(&mut self) {
+        if self.src.cur_cwd.is_empty() && self.src.cur_target.is_empty() {
+            return;
+        }
+        let rows: Vec<&rows::Row> = self.view.iter().map(|&i| &self.all[i]).collect();
+        if let Some(i) = nearest(&rows, &self.src.cur_cwd, &self.src.cur_target) {
             self.sel = i;
         }
     }
@@ -1334,10 +1454,11 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
     // installed, and from the popup failing to start.
     app.start_refresh();
     // The cursor opens on the pane the picker was opened from, which is the row
-    // marked ●, and on the top row when that pane is not an agent session. After
-    // a reopen it goes back where it was instead, since that is the row you were
-    // looking at when the terminal changed shape under you. Applied when the
-    // rows arrive, since there is nothing to put it on before that.
+    // marked ●, and on the row nearest to that pane when it is not an agent
+    // session and so has no row of its own (see `nearest`). After a reopen it
+    // goes back where it was instead, since that is the row you were looking at
+    // when the terminal changed shape under you. Applied when the rows arrive,
+    // since there is nothing to put it on before that.
     let opening_on = if app.src.state.on.is_empty() {
         app.src.cur.clone()
     } else {
@@ -1525,7 +1646,11 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
             app.rebuild();
             if !opened {
                 opened = true;
-                app.focus(&opening_on);
+                // …and when that pane is not an agent session at all, which is
+                // what F1 from a shell is, the row nearest to where it is.
+                if !app.focus(&opening_on) {
+                    app.focus_nearest();
+                }
             }
             // The terminal has grown past what this popup was asked for, and
             // tmux will not grow a popup on its own. Leaving the loop is how the
@@ -1828,6 +1953,8 @@ mod tests {
             fetch: Arc::new(move || t.clone()),
             ended: None,
             cur: String::new(),
+            cur_cwd: String::new(),
+            cur_target: String::new(),
             home: "/h".into(),
             newver: String::new(),
             script: None,
@@ -1874,6 +2001,8 @@ mod tests {
                 fetch: Arc::new(move || c.lock().unwrap().clone()),
                 ended: None,
                 cur: String::new(),
+                cur_cwd: String::new(),
+                cur_target: String::new(),
                 home: "/h".into(),
                 newver: String::new(),
                 script: None,
@@ -2326,14 +2455,99 @@ mod tests {
     fn focus_puts_the_cursor_back_and_is_silent_when_it_cannot() {
         let mut a = app(THREE);
         a.sel = 0;
-        a.focus("%3");
+        assert!(a.focus("%3"));
         assert_eq!(a.selected().map(|r| r.pane_id.as_str()), Some("%3"));
-        a.focus("%404");
+        assert!(!a.focus("%404"));
         assert_eq!(
             a.selected().map(|r| r.pane_id.as_str()),
             Some("%3"),
             "a pane that is not listed leaves the cursor alone"
         );
+    }
+
+    /// The picker as `pick` opens it: a scan, plus where the pane it was opened
+    /// from is, and no ● row because that pane runs no agent.
+    fn app_at(tsv: &str, cwd: &str, target: &str) -> App {
+        let mut a = app(tsv);
+        a.src.cur_cwd = cwd.into();
+        a.src.cur_target = target.into();
+        a.focus_nearest();
+        a
+    }
+
+    fn on(a: &App) -> &str {
+        a.selected().map(|r| r.pane_id.as_str()).unwrap_or("")
+    }
+
+    /// Four sessions around one project tree, in a session the pane pressing F1
+    /// is not in, so nothing but the directory can separate them.
+    const TREE: &str = "%1\tw:1.1\t/h/notes\tclaude\t1\tidle\t-\tnotes\n\
+                        %2\tw:2.1\t/h/proj/web\tclaude\t1\tidle\t-\tweb\n\
+                        %3\tw:3.1\t/h/proj/web/docs\tclaude\t1\tidle\t-\tdocs\n\
+                        %4\tw:4.1\t/h/proj\tclaude\t1\tidle\t-\tproj";
+
+    /// F1 from a shell: the pane it was pressed in runs no agent, so there is no
+    /// ● row to open on, and the cursor used to land on whichever row the scan
+    /// listed first, which is to say on nothing.
+    #[test]
+    fn a_pane_with_no_agent_opens_on_the_session_in_its_own_directory() {
+        assert_eq!(on(&app_at(TREE, "/h/proj/web", "z:1.1")), "%2");
+        // the same directory wins however it is written
+        assert_eq!(on(&app_at(TREE, "/h/proj/web/", "z:1.1")), "%2");
+        assert_eq!(on(&app_at(TREE, "/h/notes", "z:1.1")), "%1");
+    }
+
+    /// Nothing is in the directory itself, so the nearest one is taken: DOWN the
+    /// tree before up it, since the deeper session is the more specific answer
+    /// and the parent is often just where several projects happen to live.
+    #[test]
+    fn a_subdirectory_beats_the_parent_directory() {
+        let two = "%3\tw:3.1\t/h/proj/web/docs\tclaude\t1\tidle\t-\tdocs\n\
+                   %4\tw:4.1\t/h/proj\tclaude\t1\tidle\t-\tproj";
+        assert_eq!(on(&app_at(two, "/h/proj/web", "z:1.1")), "%3");
+        // …and from deeper in, the session on the way back up
+        assert_eq!(on(&app_at(TREE, "/h/proj/web/docs/api", "z:1.1")), "%3");
+    }
+
+    /// The directory outranks the list: a session next door in the wrong tree is
+    /// not the one you are working on.
+    #[test]
+    fn the_directory_outranks_how_near_the_pane_is() {
+        let two = "%1\tw:1.1\t/h/proj\tclaude\t1\tidle\t-\tright tree\n\
+                   %2\tw:4.1\t/h/other\tclaude\t1\tidle\t-\tnext door";
+        assert_eq!(on(&app_at(two, "/h/proj", "w:5.1")), "%1");
+    }
+
+    /// …and only then the list, which is what separates sessions the directory
+    /// cannot: the same session first, nearest window in it, then anything else
+    /// on this server, then another host, whose window numbers mean nothing here.
+    #[test]
+    fn equal_directories_are_separated_by_the_tmux_list() {
+        let same = "%1\tother:1.1\t/h/proj\tclaude\t1\tidle\t-\tanother session\n\
+                    %2\tw:9.1\t/h/proj\tclaude\t1\tidle\t-\tfar window\n\
+                    %3\tw:2.1\t/h/proj\tclaude\t1\tidle\t-\tnext window";
+        assert_eq!(on(&app_at(same, "/h/proj", "w:3.1")), "%3");
+
+        let remote = "ha:%9\tw:1.1\t/h/proj\tclaude\t1\tidle\t-\tover there\n\
+                      %1\tother:1.1\t/h/proj\tclaude\t1\tidle\t-\there";
+        assert_eq!(on(&app_at(remote, "/h/proj", "w:3.1")), "%1");
+    }
+
+    /// A directory with nothing in common says nothing about which row is
+    /// nearer, so the tie falls through to the list rather than to whichever
+    /// session happens to sit closest to the root.
+    #[test]
+    fn a_directory_that_shares_nothing_falls_through_to_the_list() {
+        let two = "%1\tw:1.1\t/h/a/b/c\tclaude\t1\tidle\t-\tdeep\n\
+                   %2\tw:4.1\t/h/b\tclaude\t1\tidle\t-\tshallow";
+        assert_eq!(on(&app_at(two, "/tmp/scratch", "w:5.1")), "%2");
+    }
+
+    /// Not knowing where the pane is means not knowing: the cursor stays at the
+    /// top rather than moving on a guess. That is every entry point but `pick`.
+    #[test]
+    fn an_unknown_position_leaves_the_cursor_at_the_top() {
+        assert_eq!(on(&app_at(TREE, "", "")), "%1");
     }
 
     const THREE: &str = "%1\ta:1.1\t/h\tclaude\t1\tidle\t-\tapple pie\n\

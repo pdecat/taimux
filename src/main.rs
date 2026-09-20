@@ -425,14 +425,24 @@ fn pick() -> i32 {
     // over there, not the ssh pane you are looking through. Resolved once, here,
     // so the ● marker and the opening cursor position agree.
     let panes = taimux_cli::remote::tmux_pane_ttys();
-    let cmd = taimux_core::tmux::ask(&[
+    // Three things about that pane, in ONE ask: what it is running, which is
+    // what decides whether it is a window onto another host, and where it is,
+    // which is what places the cursor when it turns out not to be an agent
+    // session at all and so has no row of its own. They are asked together
+    // because they are one fork, in the opening frame, and the second pair is
+    // only ever read when the first answer leads nowhere.
+    let about = taimux_core::tmux::ask(&[
         "display-message",
         "-p",
         "-t",
         &cur,
-        "#{pane_current_command}",
+        "#{pane_current_command}\t#{pane_current_path}\t#{session_name}:#{window_index}.#{pane_index}",
     ])
     .unwrap_or_default();
+    let mut f = about.split('\t');
+    let cmd = f.next().unwrap_or_default().to_string();
+    let cur_cwd = f.next().unwrap_or_default().to_string();
+    let cur_target = f.next().unwrap_or_default().to_string();
     let cur = taimux_cli::remote::resolve_cur(&cur, &panes, cmd.trim());
 
     // The indexer, detached, so the picker never waits on it: coverage simply
@@ -468,6 +478,12 @@ fn pick() -> i32 {
         }),
         ended: taimux_cli::tui::ended_source(),
         cur: cur.clone(),
+        // The LOCAL pane's, even when `cur` has just been resolved to a pane on
+        // another host: it is where the person pressing the key is, and it is
+        // the only directory this side knows. It is read at all only when the
+        // pane has no row, which over ssh means the host did not answer.
+        cur_cwd,
+        cur_target,
         newver: taimux_core::version::installed_claude(&home).unwrap_or_default(),
         home,
         script: Some(exe.clone()),
@@ -780,6 +796,12 @@ fn main() {
                 }),
                 ended: taimux_cli::tui::ended_source(),
                 cur: std::env::args().nth(2).unwrap_or_default(),
+                // Unset here: placing the cursor by where the current pane IS
+                // costs a tmux ask, and this entry point is the spike and what
+                // the suite drives, neither of which has a pane worth asking
+                // about. The picker then opens at the top, as it always did.
+                cur_cwd: String::new(),
+                cur_target: String::new(),
                 // What a session started right now would run, so a pane a
                 // self-update has left behind is painted yellow: that is the row
                 // ctrl-x acts on.

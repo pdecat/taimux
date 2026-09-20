@@ -1153,6 +1153,75 @@ FEED
 fi
 
 # ============================================================================
+section "F1 from a pane with no agent: where the cursor opens"
+# ============================================================================
+# The picker tests above drive `tui`, which is handed a row source and nothing
+# else. This one drives `pick`, the subcommand the binding runs, because the
+# question is about the pane the picker was opened FROM rather than about a key
+# pressed once it is up: that pane runs a shell, so it is not a row, the ●
+# marker has nothing to sit on, and the cursor used to land on whichever row
+# the scan listed first.
+#
+# Three sessions, and each run's answer has to be one no OTHER rule would give,
+# or a passing test proves nothing. The first picker opens in the directory of
+# the MIDDLE session: not the top of the list, which is what the cursor used to
+# fall to, and not the nearest pane either, which is the session after it. The
+# second opens somewhere with nothing in common with any of them, which is the
+# case where the directory says nothing at all and the tmux list decides, and
+# its answer is the nearest pane rather than the top of the list again.
+NSOCK="taimux-neartest-$$"
+ntmux() { tmux -f /dev/null -L "$NSOCK" "$@"; }
+if [ ! -x "$KBIN" ]; then
+  skip "the opening cursor (no taimux built; run just build)"
+elif ! command -v tmux >/dev/null 2>&1; then
+  skip "the opening cursor (no tmux here to drive it in)"
+else
+  NT="$TMP/near"
+  mkdir -p "$NT/run" "$NT/bin" "$NT/tree/other" "$NT/tree/web" "$NT/tree/api" "$NT/elsewhere"
+  # A pane whose foreground process IS "claude", the way demo.sh fakes one.
+  cp "${BASH:-/bin/bash}" "$NT/bin/claude"
+  nagent="$NT/bin/claude -c 'while :; do sleep 1; done'"
+  npick="TAIMUX_SEARCH=0 TAIMUX_SESSIONS=0 TAIMUX_REMOTE=0 XDG_RUNTIME_DIR=$NT/run $KBIN pick"
+  # Which session the cursor is on, by the directory its row shows. The path
+  # column is the last two components of it, which is what tells the two apart.
+  ncursor() {   # $1 = the window the picker is in
+    ntmux capture-pane -p -t "near:$1" 2>/dev/null |
+      sed -n 's/.*▶ .*\(tree\/[a-z]*\).*/\1/p' | head -n 1
+  }
+  # Polled, like the keys above: the first scan lands when it lands, and a fixed
+  # sleep is either flaky under load or slow for everyone. ~6s.
+  nexpect() {   # $1 = what this proves, $2 = the window, $3 = the row wanted
+    local n=0
+    while [ "$n" -lt 120 ]; do
+      [ "$(ncursor "$2")" = "$3" ] && { ok "$1"; return 0; }
+      n=$((n+1)); sleep 0.05
+    done
+    no "$1" "expected [$3] got [$(ncursor "$2")]"
+  }
+
+  # Windows 0, 1 and 2 are the agent sessions, in that order, and every picker
+  # below opens in a window of its own after them: so the top of the list is
+  # `other`, and the nearest pane to any picker is `api`.
+  ntmux new-session -d -s near -x 100 -y 24 -c "$NT/tree/other" "$nagent" 2>/dev/null
+  ntmux new-window  -d -t near              -c "$NT/tree/web"   "$nagent" 2>/dev/null
+  ntmux new-window  -d -t near              -c "$NT/tree/api"   "$nagent" 2>/dev/null
+
+  # The picker's window is the CURRENT one, not a background one: with no client
+  # attached, the pane a picker asks tmux for is resolved against the session's
+  # current window, and a picker opened with `-d` is handed the pane of whatever
+  # window was in front instead. That pane is one of the agents, which has a row,
+  # so the cursor lands on it and both runs below pass while proving nothing.
+  ntmux new-window -t near -c "$NT/tree/web" "$npick" 2>/dev/null
+  nexpect "the cursor opens on the session in the same directory" 3 "tree/web"
+
+  ntmux new-window -t near -c "$NT/elsewhere" "$npick" 2>/dev/null
+  nexpect "…and on the nearest pane when no session shares it"    4 "tree/api"
+
+  ntmux kill-server 2>/dev/null
+  pkill -f "$NT/bin/claude" 2>/dev/null
+fi
+
+# ============================================================================
 section "Tab's outdated stop: the rows ctrl-x and F8 act on, gathered"
 # ============================================================================
 # Same reasoning as the keys above, and one more of its own: this stop is the

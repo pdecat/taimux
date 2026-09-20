@@ -255,6 +255,18 @@ zoomed to fill its window. The list refreshes itself while the picker is open (a
 beat after you pause, so it never interrupts your navigation), so sessions that
 start or finish appear and disappear on their own (the border reads `· live`).
 
+**Pressed from a pane that is not an agent session**, which is what `F1` from a
+shell is, there is no `●` row to open on, and the cursor goes to the session
+nearest to where you are rather than to the top of the list. Nearest means the
+working directory first: the session in the same directory, else the one closest
+to it in the tree, counting a subdirectory of where you are before the parent of
+it (the parent is often just where several unrelated projects happen to live).
+Only where the directory cannot separate two sessions does the tmux list decide,
+and then it is the nearer pane: the same session before another one, the nearer
+window inside it, and this machine before another host. So `F1` from a shell in a
+project lands on that project's session, and `F1` from somewhere unrelated lands
+next door instead of wherever the scan happened to start.
+
 ## Supported agents
 
 `claude` · `codex` · `opencode` · `gemini` · `antigravity` · `agy` · `pi`
@@ -1068,13 +1080,14 @@ connection is; a host whose pane has *closed* since then refuses, and says so.
 Enter is the one key here that must never look like it did nothing.
 
 Pressed from **inside** a nested session, the pane you are in is the ssh pane,
-which is not an agent row at all, so the picker would open at the top of the
-list precisely when you were already looking at one of the sessions in it. The
+which is not an agent row at all, so the picker would open on whichever local
+session sits nearest that pane precisely when you were already looking at one of
+the sessions in the list. The
 current pane is therefore translated into that host's own current pane, and the
 `●` marker and the opening cursor land on the row you are actually on. That one
 is asked live rather than read off the cache: it changes the moment you move
 around over there, and a few seconds of staleness would put the cursor on the row
-you just left, which is a worse answer than the top of the list. It is bounded
+you just left, which is a worse answer than not placing it at all. It is bounded
 tighter than anything else here (`TAIMUX_SSH_CUR_TIMEOUT`, default `2`) because
 it happens in the opening frame, and a host already known to be down is not asked
 at all: failing it costs the cursor placement and nothing else.
