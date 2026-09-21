@@ -23,7 +23,8 @@
 //!   real turn and are that same flood by another route.
 //!
 //! Tool-call INPUTS fall out for free: a tool_use carries its arguments under
-//! `input`, never under `text`.
+//! `input`, never under `text`. **Their URLs are put back**, and nothing else
+//! about them is: see `tool_urls`.
 
 /// Attachment types that carry a catalogue rather than something a person wrote.
 const INJECTED: [&str; 15] = [
@@ -239,11 +240,95 @@ pub fn grab(line: &str, key: &str, out: &mut String) {
     }
 }
 
+/// The schemes a URL is recognised by. Nothing else is: a bare `www.` or a
+/// `git@host:` is not something you would type into the picker expecting a link
+/// back, and every extra pattern is another way for prose to be mistaken for one.
+const SCHEMES: [&str; 2] = ["https://", "http://"];
+
+/// Where the URL at the start of `s` ends.
+///
+/// It stops only at characters a URL cannot hold: whitespace, and the handful
+/// RFC 3986 excludes outright (`"`, `<`, `>`, `` ` ``, `\`, `{`, `}`, `|`, `^`).
+/// In a transcript that is also what keeps it inside its own JSON string, since
+/// the quote that would end the string, and every escape that could smuggle a
+/// control character in, both begin with one of them.
+///
+/// Deliberately GENEROUS at the tail. A URL cut short is one that a search for
+/// the whole thing no longer finds, which is the failure that matters here,
+/// while a few characters of trailing punctuation only make a snippet untidy.
+/// So the obvious sentence enders are trimmed back off and nothing else is
+/// guessed at: a closing bracket may well be part of the address.
+fn url_len(s: &str) -> usize {
+    let n = s
+        .find(|c: char| {
+            c.is_whitespace() || matches!(c, '"' | '<' | '>' | '`' | '\\' | '{' | '}' | '|' | '^')
+        })
+        .unwrap_or(s.len());
+    s[..n]
+        .trim_end_matches(['.', ',', ';', ':', '!', '?'])
+        .len()
+}
+
+/// Every URL in `hay`, in the order they appear.
+fn urls(hay: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(at) = hay[from..].find("http") {
+        let at = from + at;
+        let rest = &hay[at..];
+        match SCHEMES.iter().find(|s| rest.starts_with(**s)) {
+            Some(scheme) => {
+                let n = url_len(rest);
+                if n > scheme.len() {
+                    out.push(&rest[..n]);
+                }
+                from = at + n.max(1);
+            }
+            // "http" inside a word: step past it rather than past the word, so
+            // a URL butted up against it is still found.
+            None => from = at + "http".len(),
+        }
+    }
+    out
+}
+
+/// The URLs in this record's tool-call arguments, each appended once.
+///
+/// The arguments themselves stay out, for the reason they always have: they
+/// carry whole file bodies and shell command lines, and indexing them drowns
+/// the prose they sit beside. Their URLs are the exception, and they earn it.
+/// A URL is short, it is specific, and it is exactly the thing that sends you
+/// looking for a session two days later, so the page an agent FETCHED, or the
+/// endpoint a command called, is worth as much as the ones either of you typed.
+///
+/// `"input":{` can only ever be a real JSON key here. Inside a string every
+/// quote is escaped, so no prose can spell it and no `<system-reminder>` riding
+/// inside a turn can either, which is what keeps this away from the injected
+/// text the rest of the module works to drop. Everything from the first one to
+/// the end of the record is searched, the arguments being the tail of an
+/// assistant record, and a URL the prose beside them already contributed is
+/// skipped rather than stored twice.
+fn tool_urls(line: &str, prose: &str) -> String {
+    let Some(at) = line.find("\"input\":{") else {
+        return String::new();
+    };
+    let mut out = String::new();
+    for u in urls(&line[at..]) {
+        if prose.contains(u) || out.contains(u) {
+            continue;
+        }
+        out.push_str(u);
+        out.push(' ');
+    }
+    out
+}
+
 /// One line of a transcript, contributing whatever prose it holds.
 pub fn extract_line(line: &str, out: &mut String) {
     if is_noise(line) || is_injected_attachment(line) {
         return;
     }
+    let at = out.len();
     grab(line, "\"type\":\"text\",\"text\":\"", out);
     grab(line, "\"role\":\"user\",\"content\":\"", out);
     // An attachment that survived the filter is something pasted, attached or
@@ -255,6 +340,10 @@ pub fn extract_line(line: &str, out: &mut String) {
         grab(line, "\"prompt\":\"", out);
         grab(line, "\"snippet\":\"", out);
     }
+    // Last, and against what this line has just contributed, so a link that was
+    // both fetched and talked about is stored once.
+    let extra = tool_urls(line, &out[at..]);
+    out.push_str(&extra);
 }
 
 /// A whole transcript's prose, as one line.
@@ -408,6 +497,79 @@ mod tests {
         // tool_use carries its arguments under "input", never under "text"
         let l = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"echo TOOLINPUT"}}]}}"#;
         assert_eq!(one(l), "");
+    }
+
+    /// …except their URLs, which are the one part of a call worth remembering:
+    /// the page that was fetched, the endpoint that was called.
+    #[test]
+    fn a_tool_calls_urls_do_not() {
+        let l = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"WebFetch","input":{"url":"https://docs.cloud.google.com/compute/docs/machine-resource","prompt":"WHATTHEPROMPTSAID"}}]}}"#;
+        let got = one(l);
+        assert!(
+            got.contains("https://docs.cloud.google.com/compute/docs/machine-resource"),
+            "{got}"
+        );
+        // and only the URL: the rest of the arguments stay out
+        assert!(!got.contains("WHATTHEPROMPTSAID"), "{got}");
+
+        // a command line is arguments too, and the endpoint it called counts
+        let l = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"curl -s https://api.example.net/v1/things | jq .","description":"CALLIT"}}]}}"#;
+        let got = one(l);
+        assert!(got.contains("https://api.example.net/v1/things"), "{got}");
+        assert!(!got.contains("CALLIT"), "{got}");
+    }
+
+    /// A tool RESULT is still dropped whole, URLs and all: that is a fetched
+    /// page's own content, and one of those carries hundreds of links.
+    #[test]
+    fn a_tool_results_urls_stay_out() {
+        let l = r#"{"type":"user","toolUseResult":{"n":1},"message":{"role":"user","content":[{"type":"tool_result","content":"see https://spam.example.com/one and https://spam.example.com/two"}]}}"#;
+        assert_eq!(one(l), "");
+    }
+
+    /// A link that was both talked about and fetched is stored once, so the
+    /// preview does not show the same hit twice.
+    #[test]
+    fn a_url_in_the_prose_beside_the_call_is_not_stored_twice() {
+        let l = concat!(
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"reading https://example.com/page now"},"#,
+            r#"{"type":"tool_use","name":"WebFetch","input":{"url":"https://example.com/page"}}]}}"#
+        );
+        let got = one(l);
+        assert_eq!(got.matches("https://example.com/page").count(), 1, "{got}");
+    }
+
+    #[test]
+    fn a_url_ends_where_a_url_can_no_longer_go() {
+        // the JSON quote that closes the string, and the escape before it
+        assert_eq!(
+            urls(r#""url":"https://a.example/b?c=1&d=2""#),
+            ["https://a.example/b?c=1&d=2"]
+        );
+        assert_eq!(
+            urls(r#"said \"https://a.example/b\" once"#),
+            ["https://a.example/b"]
+        );
+        // a sentence's full stop is not part of the address; a path's is
+        assert_eq!(
+            urls("see https://a.example/b. Then"),
+            ["https://a.example/b"]
+        );
+        assert_eq!(
+            urls("see https://a.example/b.html now"),
+            ["https://a.example/b.html"]
+        );
+        // a closing bracket may well be, so it is kept: cutting it would lose
+        // the hit for anyone searching the whole address
+        assert_eq!(
+            urls("(https://a.example/b_(c)"),
+            ["https://a.example/b_(c)"]
+        );
+        // "http" inside a word is not a scheme, and does not hide the one after it
+        assert_eq!(urls("httpd https://a.example/b"), ["https://a.example/b"]);
+        // a scheme with nothing after it is not an address
+        assert!(urls("https:// and http://").is_empty());
+        assert!(urls("nothing here at all").is_empty());
     }
 
     #[test]

@@ -773,6 +773,24 @@ That last one is not hypothetical: the deferred-tool list alone puts
 `EnterWorktree` in every session, and indexing it made `worktree` match 154
 sessions instead of the 9 that had discussed one.
 
+**URLs are the one exception**, and they are picked back out of the tool-call
+arguments that are otherwise dropped whole. A URL is short, it is specific, and
+it is exactly the thing that sends you looking for a session two days later, so
+the page an agent *fetched* and the endpoint a command *called* are worth as much
+as the ones either of you typed. Nothing else about the call comes with them: a
+`WebFetch` contributes its address and not its prompt, a `curl` its endpoint and
+not its flags. Tool RESULTS stay out altogether, links and all, because a fetched
+page's own content carries hundreds of them; so does anything a
+`<system-reminder>` holds, which is why the arguments are read from the JSON key
+they sit under rather than swept off the record, a key no prose can spell because
+inside a string its quotes would be escaped.
+
+This part is **claude-only** for now, live pane or past session alike. It is not
+a limit worth lifting blindly: measured over Gemini and Antigravity histories
+here, every single URL their records carry and their prose does not is inside a
+tool's *output* or a terminal render, which is the flood the exclusions exist
+for. Each of those formats needs its own key, the way claude's `input` is one.
+
 For a **live pane** it is claude-only, like `restart` and `resurrect` and for the
 same reason: it has to know which conversation a pane is on, and claude is the
 only agent that publishes that. Live rows for other agents still match on what
