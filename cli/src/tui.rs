@@ -129,31 +129,52 @@ impl Mode {
         }
     }
 
-    /// One step round: all, waiting, working, idle, outdated, ended, all.
+    /// The ring Tab walks, and which stops are worth landing on.
     ///
-    /// A stop with nothing that could ever be in it is left OUT of the cycle
-    /// rather than reached and found empty: no cache of past sessions, no past
-    /// stop, and nothing installed to compare a version against, no outdated
-    /// stop. An empty list you can still land on is one you have to press Tab
-    /// past every time round.
-    fn next(self, ended: bool, outdated: bool) -> Mode {
-        let cycle = [
+    /// A stop with nothing that could ever be in it is left OUT rather than
+    /// reached and found empty: no cache of past sessions, no past stop, and
+    /// nothing installed to compare a version against, no outdated stop. An
+    /// empty list you can still land on is one you have to press Tab past every
+    /// time round.
+    fn cycle(ended: bool, outdated: bool) -> [(Mode, bool); 6] {
+        [
             (Mode::All, true),
             (Mode::Input, true),
             (Mode::Run, true),
             (Mode::Idle, true),
             (Mode::Outdated, outdated),
             (Mode::Dead, ended),
-        ];
+        ]
+    }
+
+    /// One step round the ring, forwards or back, skipping the stops that are
+    /// not on.
+    fn step(self, back: bool, ended: bool, outdated: bool) -> Mode {
+        let cycle = Mode::cycle(ended, outdated);
+        let n = cycle.len();
         let at = cycle.iter().position(|(m, _)| *m == self).unwrap_or(0);
-        cycle
-            .iter()
-            .cycle()
-            .skip(at + 1)
-            .take(cycle.len())
+        // `at + n - k` rather than `at - k`, so going backwards past the first
+        // stop stays in usize and wraps on the modulo like every other step.
+        (1..=n)
+            .map(|k| if back { at + n - k } else { at + k })
+            .map(|i| cycle[i % n])
             .find(|(_, on)| *on)
-            .map(|(m, _)| *m)
+            .map(|(m, _)| m)
             .unwrap_or(Mode::All)
+    }
+
+    /// One step round: all, waiting, working, idle, outdated, ended, all.
+    fn next(self, ended: bool, outdated: bool) -> Mode {
+        self.step(false, ended, outdated)
+    }
+
+    /// The same ring the other way, which is what shift-tab walks.
+    ///
+    /// Worth binding because the ring is short and the stop you want is as
+    /// often the one behind you as the one ahead: overshooting "waiting for an
+    /// answer" by one used to cost four more presses to come back to.
+    fn prev(self, ended: bool, outdated: bool) -> Mode {
+        self.step(true, ended, outdated)
     }
 }
 
@@ -1316,6 +1337,24 @@ impl App {
         }
     }
 
+    /// Move to the next list, or with `back` to the one before it.
+    ///
+    /// Re-filtered from the rows already in hand, so the new list is on screen
+    /// at once; the scan behind it lands when it lands.
+    fn step_mode(&mut self, back: bool) {
+        // Nothing installed to compare against and the outdated stop is not in
+        // the ring at all: every row there would be judged against an empty
+        // version, so the list could only ever be empty.
+        let (ended, outdated) = (self.src.ended.is_some(), !self.src.newver.is_empty());
+        self.mode = if back {
+            self.mode.prev(ended, outdated)
+        } else {
+            self.mode.next(ended, outdated)
+        };
+        self.rebuild();
+        self.start_refresh();
+    }
+
     fn clamp(&mut self) {
         if self.view.is_empty() {
             self.sel = 0;
@@ -1784,20 +1823,15 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
                     // why one pair kept working and the other went quiet.
                     KeyCode::PageDown => app.move_page(1, page),
                     KeyCode::PageUp => app.move_page(-1, page),
-                    KeyCode::Tab => {
-                        // Nothing installed to compare against and the outdated
-                        // stop is not in the cycle at all: every row there would
-                        // be judged against an empty version, so the list could
-                        // only ever be empty.
-                        app.mode = app
-                            .mode
-                            .next(app.src.ended.is_some(), !app.src.newver.is_empty());
-                        // Re-filtered from the rows already in hand, so the new
-                        // list is on screen at once; the scan behind it lands
-                        // when it lands.
-                        app.rebuild();
-                        app.start_refresh();
-                    }
+                    // Shift-tab walks the ring the other way. A terminal sends
+                    // it as BackTab, and one with the kitty flags pushed sends
+                    // Tab carrying SHIFT instead, so both are taken. BackTab is
+                    // matched on its own rather than or-ed into the guarded arm
+                    // below, because the modifier it arrives with is the part
+                    // that differs between terminals and the key is not.
+                    KeyCode::BackTab => app.step_mode(true),
+                    KeyCode::Tab if shift => app.step_mode(true),
+                    KeyCode::Tab => app.step_mode(false),
                     KeyCode::Char('r') if ctrl => app.start_refresh(),
                     // Nothing is bound when search is turned off, and the
                     // picker then behaves exactly as it did before there was any.
@@ -2602,12 +2636,50 @@ mod tests {
         );
     }
 
+    /// Shift-tab is the same ring read backwards, so a step each way from
+    /// anywhere lands back where it started.
+    #[test]
+    fn shift_tab_steps_the_other_way_round_the_cycle() {
+        let mut m = Mode::All;
+        let seen: Vec<Mode> = (0..6)
+            .map(|_| {
+                m = m.prev(true, true);
+                m
+            })
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                Mode::Dead,
+                Mode::Outdated,
+                Mode::Idle,
+                Mode::Run,
+                Mode::Input,
+                Mode::All
+            ]
+        );
+        for m in [
+            Mode::All,
+            Mode::Input,
+            Mode::Run,
+            Mode::Idle,
+            Mode::Outdated,
+            Mode::Dead,
+        ] {
+            assert_eq!(m.next(true, true).prev(true, true), m);
+            assert_eq!(m.prev(true, true).next(true, true), m);
+        }
+    }
+
     /// Ended is skipped where there is nothing to show, rather than trapping the
     /// picker in a mode with no rows in it.
     #[test]
     fn the_ended_mode_is_skipped_without_a_sessions_cache() {
         assert_eq!(Mode::Idle.next(false, false), Mode::All);
         assert_eq!(Mode::Idle.next(true, false), Mode::Dead);
+        // and backwards it is skipped the same way
+        assert_eq!(Mode::All.prev(false, false), Mode::Idle);
+        assert_eq!(Mode::All.prev(true, false), Mode::Dead);
     }
 
     /// …and so is outdated, where nothing is installed to judge a version
@@ -2620,6 +2692,9 @@ mod tests {
         assert_eq!(Mode::Outdated.next(true, true), Mode::Dead);
         // both gates off: idle is the last stop
         assert_eq!(Mode::Idle.next(false, false), Mode::All);
+        // …and going back from the first stop skips it just the same
+        assert_eq!(Mode::All.prev(false, false), Mode::Idle);
+        assert_eq!(Mode::All.prev(false, true), Mode::Outdated);
     }
 
     #[test]

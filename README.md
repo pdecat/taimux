@@ -137,6 +137,11 @@ a different list entirely, the conversations nothing is running any more (see
 all sessions  →  waiting  →  working  →  idle  →  outdated  →  past sessions  →  all sessions
 ```
 
+**Shift-Tab** walks the same ring the other way, and skips the same empty stops.
+The ring is short enough that the list you want is as often the one behind you as
+the one ahead, and overshooting the waiting list by one press used to cost four
+more to come back to it.
+
 The border label names the list you are looking at, and the mode is kept across a
 refresh (by hand or on the timer), so a picker left open on the waiting list is a
 live list of the sessions that want an answer, one that empties itself as you deal
@@ -482,6 +487,7 @@ Inside the picker:
 | double-click   | …and switch to it, as `Enter` would |
 | `Enter`        | switch to the pane (and zoom it), or [reopen a past session in its own tool](#past-sessions) |
 | `Tab`          | cycle the list: all → waiting → working → idle → [outdated](#sessions-running-outdated-code) → [past](#past-sessions) → all |
+| `Shift-Tab`    | …the same ring, backwards       |
 | `Ctrl-r`       | refresh the list now            |
 | `Ctrl-/`       | toggle the preview              |
 | `Ctrl-x`       | restart the highlighted claude session onto the installed version |
