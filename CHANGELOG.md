@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.16.0](https://github.com/pdecat/taimux/compare/v0.15.1...v0.16.0) (2026-09-21)
+
+
+### Features
+
+* a URL survives the tool call it was an argument to ([6e473f1](https://github.com/pdecat/taimux/commit/6e473f19d38fcdf6dcff337c1d67291852a7ec37))
+* shift-tab walks the list ring backwards ([d5a64af](https://github.com/pdecat/taimux/commit/d5a64af1f2fb63852b9527d7e856ca9e136237b8))
+* the picker ignores case, whichever side carries the capital ([54cadbb](https://github.com/pdecat/taimux/commit/54cadbbd9c2fb4c5159cd4c09042cd8e6b8a1e0b))
+
 ## [0.15.1](https://github.com/pdecat/taimux/compare/v0.15.0...v0.15.1) (2026-09-20)
 
 
