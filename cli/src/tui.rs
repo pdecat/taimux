@@ -1430,7 +1430,10 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
     let live = refresh > 0.0;
 
     let mut app = App {
-        matcher: SkimMatcherV2::default().smart_case(),
+        // Not `smart_case`, which is fzf's default and was this picker's: see
+        // `index::Query`. The two matchers have to agree about what a capital
+        // means, and the answer both give now is "nothing".
+        matcher: SkimMatcherV2::default().ignore_case(),
         mode: Mode::All,
         search: false,
         preview: true,
@@ -1979,7 +1982,7 @@ mod tests {
     fn app(tsv: &str) -> App {
         let mut a = App {
             src: src(tsv),
-            matcher: SkimMatcherV2::default().smart_case(),
+            matcher: SkimMatcherV2::default().ignore_case(),
             mode: Mode::All,
             search: false,
             preview: true,
@@ -2022,7 +2025,7 @@ mod tests {
                 popup: false,
                 state: Default::default(),
             },
-            matcher: SkimMatcherV2::default().smart_case(),
+            matcher: SkimMatcherV2::default().ignore_case(),
             mode: Mode::All,
             search: false,
             preview: true,

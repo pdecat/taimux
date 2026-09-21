@@ -739,9 +739,13 @@ Three things about how it matches, each of which had to be that way:
   content matching itself, one plain substring test per whitespace-separated
   term, and puts only the short snippet on the row, which contains what you typed
   and so can be matched the ordinary way, on a row you can see all of.
-- **Case-insensitive until you type a capital**, the smart case fzf popularised,
-  so the row and the transcript behind it never disagree about what a capital
-  means.
+- **Case-insensitive, always**, on the row and in the transcript alike. This was
+  fzf's smart case until now, matching literally as soon as the query carried a
+  capital, which is a reasonable default for file names and a poor one for what
+  was *said*: two days later you do not remember how a hostname, an error string
+  or a URL was capitalised, and one capital anywhere made every term strict at
+  once, so a pasted link with a capital in its path quietly matched nothing while
+  the same link in lower case matched fine.
 - **Three characters minimum.** Below that a term is in every transcript and the
   match would say nothing, so short queries filter on the row alone.
 

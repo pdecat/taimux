@@ -280,15 +280,15 @@ fn path_display(cwd: &str, home: &str) -> String {
 /// Does the row already show everything that was typed? If it does it needs no
 /// explaining, and keeping its path, agent and version is worth more than quoting
 /// the query back at it.
-fn says_it(s: &str, terms: &[String], fold: bool) -> bool {
+///
+/// Case-insensitive, as the content search now is: `terms` arrive folded. The
+/// two have to agree, or a row kept because of a capital the transcript spells
+/// differently would still be told it says nothing.
+fn says_it(s: &str, terms: &[String]) -> bool {
     if terms.is_empty() {
         return false;
     }
-    let hay = if fold {
-        s.to_lowercase()
-    } else {
-        s.to_string()
-    };
+    let hay = s.to_lowercase();
     terms
         .iter()
         .all(|t| t.is_empty() || hay.contains(t.as_str()))
@@ -377,14 +377,13 @@ pub struct Input<'a> {
 }
 
 pub fn build(lines: &str, input: &Input) -> Vec<Row> {
+    // Folded, because the search behind them is: see `says_it`.
     let terms: Vec<String> = input
         .query
         .split([' ', '\t'])
         .filter(|t| !t.is_empty())
-        .map(|t| t.to_string())
+        .map(|t| t.to_lowercase())
         .collect();
-    // smart case, as fzf does it
-    let fold = input.query == input.query.to_lowercase();
 
     let mut items: Vec<Item> = Vec::new();
     for line in lines.lines() {
@@ -581,7 +580,6 @@ pub fn build(lines: &str, input: &Input) -> Vec<Row> {
             !says_it(
                 &format!("{} {} {} {} {}", plabel, sum, it.path, it.agent, it.version),
                 &terms,
-                fold,
             )
         });
         if let Some(s) = snip {
@@ -1068,11 +1066,33 @@ mod tests {
         assert!(r[1].plain().contains("⌕ …other words…"));
     }
 
+    /// Whichever side carries the capital. `build` folds the terms, and a row
+    /// showing `Refactor` answers a query for `REFACTOR` as well as one for
+    /// `refactor`.
     #[test]
-    fn says_it_is_smart_case_like_fzf() {
-        let lower = vec!["refactor".to_string()];
-        assert!(says_it("Refactor auth", &lower, true));
-        let upper = vec!["Refactor".to_string()];
-        assert!(!says_it("refactor auth", &upper, false));
+    fn says_it_ignores_case_both_ways() {
+        assert!(says_it("Refactor auth", &["refactor".to_string()]));
+        assert!(says_it("refactor auth", &["refactor".to_string()]));
+        assert!(!says_it("refactor auth", &["rewrite".to_string()]));
+    }
+
+    /// …and the row built from a shouted query keeps its path rather than being
+    /// handed a snippet to explain a match it visibly already shows.
+    #[test]
+    fn a_shouted_query_still_counts_as_said_on_the_row() {
+        let mut snips = HashMap::new();
+        snips.insert("%10".to_string(), "…the words it said…".to_string());
+        let r = build(
+            THREE,
+            &Input {
+                width: 100,
+                home: "/home/p",
+                query: "REFACTOR",
+                snips,
+                ..Default::default()
+            },
+        );
+        assert!(r[0].plain().contains("proj/web"));
+        assert!(!r[0].plain().contains('⌕'));
     }
 }

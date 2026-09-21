@@ -54,28 +54,31 @@ pub fn sessions_file() -> PathBuf {
     crate::paths::runtime_dir().join("sessions")
 }
 
-/// The query split the way the picker splits it, with fzf's smart case: a query
-/// that is all lower case matches case-insensitively, one carrying a capital is
-/// taken literally.
+/// The query split the way the picker splits it. **Case-insensitive, always.**
+///
+/// It was fzf's smart case until now: all lower case matched either way, and a
+/// capital anywhere made the whole query literal. That is a reasonable default
+/// for matching file names and a poor one for matching what was SAID. You do
+/// not remember two days later how a hostname, an error string or a URL was
+/// capitalised, and one capital turned every term strict at once, so a pasted
+/// link with a capital in its path quietly matched nothing at all while the
+/// same link typed in lower case matched fine. The row matcher folds the same
+/// way, so the row and the transcript behind it still never disagree about what
+/// a capital means.
 pub struct Query {
+    /// Already folded, since the haystack is.
     pub terms: Vec<String>,
-    pub fold: bool,
 }
 
 impl Query {
     pub fn new(q: &str) -> Query {
         Query {
-            terms: q.split_whitespace().map(|t| t.to_string()).collect(),
-            fold: q == q.to_lowercase(),
+            terms: q.split_whitespace().map(|t| t.to_lowercase()).collect(),
         }
     }
 
     fn haystack(&self, line: &str) -> String {
-        if self.fold {
-            line.to_lowercase()
-        } else {
-            line.to_string()
-        }
+        line.to_lowercase()
     }
 }
 
@@ -96,10 +99,15 @@ fn read_entry(path: &std::path::Path) -> Option<(String, String)> {
 ///
 /// Character-wise, not byte-wise: a snippet cut mid-character is not text any
 /// more, and these blobs carry whatever the sessions said.
+///
+/// `at` is an offset into the FOLDED blob and the window is cut from the
+/// original, which for a handful of characters are not the same length: `İ`
+/// lower-cases to two. So both ends are clamped, since the alternative to a
+/// window a character or two out of place is a panicking picker.
 fn window(blob: &str, at: usize, len: usize, ctx: usize) -> String {
     let chars: Vec<char> = blob.chars().collect();
-    let s = at.saturating_sub(ctx);
-    let e = (at + len + ctx).min(chars.len());
+    let s = at.saturating_sub(ctx).min(chars.len());
+    let e = (at + len + ctx).clamp(s, chars.len());
     let mut out = String::new();
     if s > 0 {
         out.push('…');
@@ -189,10 +197,12 @@ pub fn preview_hits(pane: &str, q: &Query, want: usize) -> Vec<Hit> {
         let Some(b) = hay[from..].find(first.as_str()) else {
             break;
         };
-        let at = hay[..from + b].chars().count();
+        // Clamped for the same reason `window` clamps: this offset is into the
+        // folded blob and the text is cut from the original.
+        let at = hay[..from + b].chars().count().min(chars.len());
         let len = first.chars().count();
         let s = at.saturating_sub(PREVIEW_CTX);
-        let e = (at + len + PREVIEW_CTX).min(chars.len());
+        let e = (at + len + PREVIEW_CTX).clamp(at, chars.len());
         out.push(Hit {
             before: chars[s..at].iter().collect(),
             term: chars[at..(at + len).min(chars.len())].iter().collect(),
@@ -416,16 +426,21 @@ mod tests {
         assert!(w.chars().count() <= 4 + 6 + 4 + 2);
     }
 
+    /// Whatever you type, whatever was said. A capital used to make the whole
+    /// query literal, which is how a pasted link with one in its path found
+    /// nothing at all.
     #[test]
-    fn smart_case_matches_the_way_fzf_does() {
+    fn matching_ignores_case_whichever_side_carries_it() {
         let q = Query::new("auth layer");
-        assert!(q.fold);
-        assert_eq!(q.terms.len(), 2);
+        assert_eq!(q.terms, ["auth", "layer"]);
         assert_eq!(q.haystack("AUTH Layer"), "auth layer");
 
-        let q = Query::new("Auth");
-        assert!(!q.fold);
-        assert_eq!(q.haystack("AUTH Layer"), "AUTH Layer");
+        let q = Query::new("https://Github.com/Pdecat");
+        assert_eq!(q.terms, ["https://github.com/pdecat"]);
+        assert_eq!(
+            q.haystack("HTTPS://GITHUB.COM/PDECAT"),
+            "https://github.com/pdecat"
+        );
     }
 
     #[test]
