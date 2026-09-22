@@ -292,6 +292,20 @@ goes. None of it is required: with no hook installed every row still comes off
 `ps` and the screen, exactly as before. Claude Code is the only agent wired up
 so far.
 
+When a row reads wrong, `taimux state <pane>` prints every input behind it: the
+hook line and its age, the newest turn record in the transcript, what the screen
+shows, and what those come to:
+
+```
+$ taimux state %34
+pane        %34, claude pid 3876934
+hook line   run (mode auto), written 6s ago
+transcript  Interrupt 1s ago, /home/you/.claude/projects/-home-you-src-app/27266dd7-….jsonl
+corrected   idle (the transcript is newer than the line)
+screen      idle: prompt box shown, turn line Done
+reading     idle
+```
+
 ## Narrow windows
 
 On a narrow window (under 100 columns, the same threshold at which the binding

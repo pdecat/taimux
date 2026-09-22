@@ -694,6 +694,88 @@ fn repopup(client: &str, cur: &str) -> i32 {
     1
 }
 
+/// `taimux state <pane>`: why a pane reads the way it does.
+fn state_report(id: &str) -> i32 {
+    use taimux_core::{conv, hook, state, turn};
+    let rows = taimux_core::panes::agent_rows();
+    let Some(row) = rows.lines().find(|l| l.split('\t').next() == Some(id)) else {
+        eprintln!("taimux: {} is not an agent pane on this server", id);
+        return 1;
+    };
+    let f: Vec<&str> = row.split('\t').collect();
+    let (agent, pid) = (f[3], f[4].parse::<i32>().unwrap_or(0));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64);
+    let ago = |at: i64| {
+        let secs = (now - at) / 1000;
+        if secs < 60 {
+            format!("{}s ago", secs.max(0))
+        } else {
+            format!("{} ago", taimux_core::index::age(at / 1000, now / 1000))
+        }
+    };
+    println!("pane        {}, {} pid {}", id, agent, pid);
+    let raw = hook::hook_entry(id, pid);
+    match &raw {
+        Some(e) => println!(
+            "hook line   {} (mode {}), written {}",
+            e.state,
+            e.mode,
+            ago(e.at)
+        ),
+        None => println!("hook line   none written by this process"),
+    }
+    let cwd = std::fs::read_link(format!("/proc/{}/cwd", pid))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    match conv::resolve_from_pane(id, &cwd, pid) {
+        Some(r) => match turn::last_event_in(&r.transcript) {
+            Some((ev, at)) => println!(
+                "transcript  {:?} {}, {}",
+                ev,
+                ago(at),
+                r.transcript.display()
+            ),
+            None => println!(
+                "transcript  no turn opened or closed in its last {} KB, {}",
+                turn::TAIL / 1024,
+                r.transcript.display()
+            ),
+        },
+        None => println!("transcript  not found for this pane"),
+    }
+    let current = hook::current(id, pid);
+    if let (Some(r), Some(c)) = (&raw, &current) {
+        if r.state != c.state {
+            println!(
+                "corrected   {} (the transcript is newer than the line)",
+                c.state
+            );
+        }
+    }
+    let screen = taimux_core::tmux::capture(id).unwrap_or_default();
+    let lines: Vec<&str> = screen.lines().collect();
+    println!(
+        "screen      {}: {}, {}",
+        state::classify(&screen).as_str(),
+        if state::live_box(&lines).is_some() {
+            "prompt box shown"
+        } else {
+            "no prompt box shown"
+        },
+        match state::turn_marker(&screen) {
+            Some(t) => format!("turn line {:?}", t),
+            None => "no turn line".to_string(),
+        }
+    );
+    println!(
+        "reading     {}",
+        state::merge(&screen, current.as_ref().map(|e| e.state.as_str())).as_str()
+    );
+    0
+}
+
 /// This binary's own path, which is what a binding and a symlink both point at.
 fn self_exe() -> String {
     std::env::current_exe()
@@ -785,6 +867,36 @@ fn main() {
                 let _ = std::io::stdin().read_to_string(&mut buf);
                 print!("{}", taimux_core::transcript::extract(&buf));
                 0
+            }
+        },
+        // The newest record in a transcript that opened or closed a turn, and
+        // when: what the state reading asks of a transcript, for checking that
+        // reading against a jq one over the same files.
+        "turn" => match std::env::args().nth(2) {
+            Some(path) => match taimux_core::turn::last_event_in(std::path::Path::new(&path)) {
+                Some((ev, at)) => {
+                    println!("{:?}\t{}", ev, at);
+                    0
+                }
+                None => {
+                    println!("none");
+                    0
+                }
+            },
+            None => {
+                eprintln!("usage: taimux turn <transcript>");
+                2
+            }
+        },
+        // Every input to one pane's state, and the answer. For the report that a
+        // row reads wrong, which was otherwise answered by re-deriving all of it
+        // by hand: the hook line and its age, what the transcript says since,
+        // what the screen shows, and what those come to.
+        "state" => match std::env::args().nth(2) {
+            Some(id) => state_report(&id),
+            None => {
+                eprintln!("usage: taimux state <pane id>");
+                2
             }
         },
         // Classify a screen read on stdin. Exists for differential testing: the
