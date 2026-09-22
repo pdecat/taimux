@@ -209,9 +209,9 @@ pub fn list_rows(
                 c
             }
         };
-        let hook = crate::hook::hook_entry(id, pid);
-        let merged = crate::state::merge(&screen, hook.as_ref().map(|(st, _)| st.as_str()));
-        let mode = hook.map(|(_, m)| m).unwrap_or_else(|| "-".into());
+        let hook = crate::hook::current(id, pid);
+        let merged = crate::state::merge(&screen, hook.as_ref().map(|e| e.state.as_str()));
+        let mode = hook.map(|e| e.mode).unwrap_or_else(|| "-".into());
 
         let exe = std::fs::read_link(format!("/proc/{}/exe", pid))
             .map(|p| p.to_string_lossy().into_owned())
@@ -238,6 +238,15 @@ pub fn list_rows(
         ));
     }
     s
+}
+
+/// What the session in one pane is doing, read exactly as the list reads it:
+/// the hook line brought up to date by the transcript, then the screen. For the
+/// callers that ask about a pane at a time, `print-cmds` and `resurrect`.
+pub fn state_of(id: &str, pid: i32) -> crate::state::State {
+    let screen = crate::tmux::capture(id).unwrap_or_default();
+    let hook = crate::hook::current(id, pid);
+    crate::state::merge(&screen, hook.as_ref().map(|e| e.state.as_str()))
 }
 
 pub fn agent_rows() -> String {

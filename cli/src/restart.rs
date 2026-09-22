@@ -59,41 +59,10 @@ pub fn transcript_is_settled(text: &str, now: i64) -> Result<(), String> {
 }
 
 /// An ISO 8601 UTC timestamp to epoch seconds, which is all claude writes:
-/// `2026-09-02T01:23:45.678Z`.
-///
-/// Hand-rolled rather than shelling to `date -d`, which is what bash did per
-/// pane. Only the shape claude actually emits is accepted; anything else reads as
-/// "no answer", and the caller treats that as not-evidence rather than as busy.
+/// `2026-09-02T01:23:45.678Z`. The parse is `turn::epoch_ms`, which the state
+/// reading needs to the millisecond; this only wants the second.
 fn parse_iso8601(s: &str) -> Option<i64> {
-    let b = s.as_bytes();
-    if b.len() < 19
-        || b[4] != b'-'
-        || b[7] != b'-'
-        || b[10] != b'T'
-        || b[13] != b':'
-        || b[16] != b':'
-    {
-        return None;
-    }
-    let n = |a: usize, z: usize| s[a..z].parse::<i64>().ok();
-    let (y, mo, d) = (n(0, 4)?, n(5, 7)?, n(8, 10)?);
-    let (h, mi, sec) = (n(11, 13)?, n(14, 16)?, n(17, 19)?);
-    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
-        return None;
-    }
-    Some(days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + sec)
-}
-
-/// Days since 1970-01-01 for a civil date. Howard Hinnant's algorithm, which is
-/// exact for every date and has no calendar table to get wrong.
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let mp = (m + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146097 + doe - 719468
+    taimux_core::turn::epoch_ms(s).map(|ms| ms.div_euclid(1000))
 }
 
 /// Is the screen free of anything a Ctrl-C would mean something else to?

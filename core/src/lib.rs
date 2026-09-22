@@ -24,4 +24,5 @@ pub mod stat;
 pub mod state;
 pub mod tmux;
 pub mod transcript;
+pub mod turn;
 pub mod version;

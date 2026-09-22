@@ -65,15 +65,7 @@ fn resurrect_main(file: &str, dry: bool, verbose: bool) -> i32 {
         return 1;
     };
     let state_of = |id: &str, pid: i32| -> String {
-        let screen = taimux_core::tmux::capture(id).unwrap_or_default();
-        taimux_core::state::merge(
-            &screen,
-            taimux_core::hook::hook_entry(id, pid)
-                .as_ref()
-                .map(|(st, _)| st.as_str()),
-        )
-        .as_str()
-        .to_string()
+        taimux_core::panes::state_of(id, pid).as_str().to_string()
     };
     let records = taimux_core::conv::print_cmds(&taimux_core::panes::agent_rows(), &state_of);
     let Ok(save) = std::fs::read_to_string(path) else {
@@ -1018,15 +1010,7 @@ fn main() {
             // than the title glyph: one busy taxonomy in the tool instead of two
             // that drift apart, which is what the ccrestart absorption was for.
             let state_of = |id: &str, pid: i32| -> String {
-                let screen = taimux_core::tmux::capture(id).unwrap_or_default();
-                taimux_core::state::merge(
-                    &screen,
-                    taimux_core::hook::hook_entry(id, pid)
-                        .as_ref()
-                        .map(|(st, _)| st.as_str()),
-                )
-                .as_str()
-                .to_string()
+                taimux_core::panes::state_of(id, pid).as_str().to_string()
             };
             print!(
                 "{}",

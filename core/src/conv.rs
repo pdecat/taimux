@@ -17,7 +17,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::hook::json_str;
+use crate::json::scan as json_str;
 
 /// Where claude keeps its state.
 pub fn claude_dir() -> PathBuf {

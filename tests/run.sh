@@ -220,6 +220,9 @@ FAKEI
     eq "Stop gets the hook"                  "1" "$(hooked Stop)"
     eq "PermissionRequest gets the hook"     "1" "$(hooked PermissionRequest)"
     eq "SessionEnd gets the hook"            "1" "$(hooked SessionEnd)"
+    eq "PostToolUse gets the hook"           "1" "$(hooked PostToolUse)"
+    eq "Notification gets the hook"          "1" "$(hooked Notification)"
+    eq "StopFailure gets the hook"           "1" "$(hooked StopFailure)"
     has "a hook already there is left alone" "$SET" "someone-elses-hook"
     has "and so is everything else"          "$SET" '"theme": "dark"'
     "$PLUG" install-hooks >/dev/null 2>&1

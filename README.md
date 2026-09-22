@@ -106,8 +106,11 @@ title while its screen read `Twisting… (35s · ↓ 1.6k tokens)`. Its long
 `<project>: <title> ⑂ <last prompt>` form leads with nothing at all. Whatever
 glyph a title does carry is therefore stripped, not shown.
 
-So the pane's own **screen** decides both, off a single capture per pane (about
-2 ms each):
+The pane's own **screen** is one reading of it, off a single capture per pane
+(about 2 ms each). For Claude Code it is the corrective rather than the source,
+since the session also reports on itself and its transcript records what no
+report covers (see [Told, rather than guessed](#told-rather-than-guessed)); for
+every other agent it is the only reading there is:
 
 - **waiting**: a dialog draws a numbered choice list, and the lowest prompt line
   on screen is the one that owns it, with the footer read over the last few lines
@@ -123,6 +126,24 @@ So the pane's own **screen** decides both, off a single capture per pane (about
   because it is nowhere near the bottom of the screen: Claude tucks a tip row and
   a token count under it, and then come the title rule, the prompt box, its own
   rule and two status rows. Measured across 39 live panes it sat 2 to 9 lines up.
+  A finished line ending `· 1 shell still running` is a turn that left work in
+  flight, and reads as working too, since the session will wake itself when that
+  work reports back;
+- **over**: that finished line, or `⎿  Interrupted · What should Claude do
+  instead?`, which is all an interrupted reply leaves behind;
+- **idle**: the prompt box, but only the live one, the `❯` with a rule directly
+  above it. The conversation marks every prompt already sent with the same
+  glyph, and taking any `❯` for the box read a pane as idle while a permission
+  prompt sat unanswered in it for 35 hours: its viewport had been scrolled up,
+  which Claude Code's fullscreen renderer allows, and a scrolled viewport shows
+  old prompts and no box at all.
+
+The fullscreen renderer also draws **no turn line** while a reply streams, only
+the reply, so the lowest turn line on screen is then the previous turn's
+finished one. Two more signs keep that from reading as done: the status row
+under the box says `esc to interrupt` for as long as a turn runs (where the row
+has room for it), and a sent prompt below a turn line makes that line an earlier
+turn's.
 
 A dialog wins over a turn line, since it is the row that wants you.
 
@@ -170,18 +191,40 @@ So a session can report itself instead, through its own hooks:
 taimux install-hooks      # registers `taimux hook` in ~/.claude/settings.json
 ```
 
-That registers one command for seven events. Five are turn boundaries:
+That registers one command for nine events. Six are turn boundaries:
 `SessionStart`, `UserPromptSubmit` (a turn started), `Stop` (it ended),
+`StopFailure` (it ended on an API error, which runs instead of `Stop`),
 `PermissionRequest` (about to ask you) and `SessionEnd`. Two more, `PostToolUse`
 and `PostToolUseFailure`, say a tool just ran and so the turn is still going.
 Those two fire per tool call rather than per turn, which the bash version could
 not have afforded and this one can: 685 µs an invocation, so a thirty-call turn
-spends 20 ms of CPU over the minutes it takes. Each writes one line under
+spends 20 ms of CPU over the minutes it takes. The last, `Notification`, is
+there for one kind only (below). Each writes one line under
 `$XDG_RUNTIME_DIR/taimux/`, keyed by the pane:
 
 ```
-<agent pid>   <state>   <permission mode>
+<agent pid>   <state>   <permission mode>   [<subagent>]
 ```
+
+The state is one of five:
+
+| | |
+|---|---|
+| `run` | a turn is in flight |
+| `input` | a permission was asked for, which auto mode may have answered unseen |
+| `ask` | the same, **confirmed on screen**: Claude's own `permission_prompt` notification goes out once a prompt has sat there unanswered for about six seconds, and never for one auto mode settled. AskUserQuestion and MCP forms count too |
+| `idle` | the turn is over |
+| `bg` | the turn is over, but `Stop` listed background work still in flight (a shell, a subagent), and the session will wake itself when it reports back. Reads as working, and `restart` leaves it alone |
+
+`ask` is what lets a session read as waiting when its screen cannot show the
+dialog: a pane too short to draw one, or a viewport scrolled away from it.
+
+**Subagents fire these hooks too**, with an `agent_id` in the payload, and since
+Claude Code 2.1.198 they run in the background by default, so their tool calls
+go on landing after the main thread's `Stop`. Taken at their word they put a
+session back in the working list while it sat at an empty prompt. A subagent's
+tool call now changes only one thing, a dialog that same subagent raised (the
+fourth field says whose it is), since running is how a granted permission shows.
 
 The pane comes from `$TMUX_PANE`, which every agent started in a tmux pane carries
 in its environment and hands to the hooks it spawns. The **pid** is what makes the
@@ -197,13 +240,27 @@ previous turn closed with, and nothing else in the turn would touch it. Its firs
 tool call puts it back to `run`. Found in the wild on a pane prompted twice one
 morning and two minutes into a turn, whose line had not moved in two days.
 
+**An interrupt fires nothing at all.** `Stop` does not run when you stop a turn
+yourself, and a probe found no other event that does: Esc part way through a
+reply, Esc on a permission prompt, and not even an `idle_prompt` notification a
+minute later. So the line went on reading `run` until the next prompt, and across
+twelve transcripts over two days that was about fifty turns. The **transcript**
+does record it, at once, as `[Request interrupted by user]`, so its last 64 KB
+are read too, for the newest record that opened or closed a turn, and set
+against the line's own mtime: an interrupt, or the end of a turn, written after a
+line reading `run` means that line is stale, and so does a typed prompt written
+after one reading `idle`. It costs nothing measurable, since the captures are
+what a list pays for.
+
 A dialog **on screen** still outranks the line, because that is the state which
 must never be wrong: granting a permission fires no event of its own, so the line
 reads `input` until the tool actually runs and `PostToolUse` lands. Three more
 readings overrule it, the same argument in all three directions: an idle prompt
-box under a line reading `input`, a turn line with a live counter under one
-reading `idle`, and a **finished** turn line with an idle prompt box under it and
-no later turn line below, under one reading `run`. Each time the screen says
+box under a line reading `input` or `ask`, a turn line with a live counter under
+one reading `idle`, and a **finished** (or interrupted) turn line with an idle
+prompt box under it and no later turn line or sent prompt below, under one
+reading `run`. A counter running under `ask` is a permission granted to a tool
+still at work, and reads as working. Each time the screen says
 positively what the line has stopped saying, and a line that stopped being written
 is what a missed event leaves behind. That last one is the worst of the three
 while it lasts, because nothing ever clears it: the pane sits in the working list
@@ -229,10 +286,11 @@ the agent name is painted, so it costs the summary no width:
 
 Two things to expect: a mode flipped mid-turn with `shift+tab` shows up at the end
 of that turn (no event announces the flip, and scraping the footer is what this
-exists to stop doing), and sessions already running when the hook is installed
-report nothing until they restart. None of it is required: with no hook installed
-every row still comes off `ps` and the screen, exactly as before. Claude Code is
-the only agent wired up so far.
+exists to stop doing), and a session already running when an event is added
+reports it from its next turn, since Claude Code picks up hook changes as it
+goes. None of it is required: with no hook installed every row still comes off
+`ps` and the screen, exactly as before. Claude Code is the only agent wired up
+so far.
 
 ## Narrow windows
 
@@ -1491,11 +1549,11 @@ Measured on 31 live panes, byte-identical output in all eight fields:
 | a full picker row build | 493 ms → **134 ms** |
 
 It also carries the **session hook**, which is the most frequently executed command
-in the whole system: five turn boundaries plus one per tool call, per session,
-across ~28 sessions. `taimux install-hooks` registers it, and refuses when the
-binary is not built rather than registering a command that cannot run. Measured at
-**20.5 ms an event against 1.9 ms**, because every bash run parses the 4400-line
-script before doing anything. That ratio is why the two per-tool-call events are
+in the whole system: six turn boundaries and the odd notification plus one per
+tool call, per session, across ~28 sessions. `taimux install-hooks` registers it,
+and refuses when the binary is not built rather than registering a command that
+cannot run. Measured at **20.5 ms an event against 1.9 ms**, because every bash
+run parses the 4400-line script before doing anything. That ratio is why the two per-tool-call events are
 affordable at all: at 685 µs an invocation they cost a thirty-call turn 20 ms of
 CPU, where bash would have spent 615 ms of it. It deliberately does *not* use the socket: the work is local and
 stateless, so a round trip would add latency and a second failure mode and buy

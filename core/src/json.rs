@@ -63,6 +63,27 @@ pub fn scan(text: &str, key: &str) -> Option<String> {
     None
 }
 
+/// Whether `"key": [ ... ]` holds anything, looking past decoys the way `scan`
+/// does. `None` when the key is not there as an array at all.
+///
+/// All a hook needs to know about `Stop`'s `background_tasks`: an empty list
+/// means the session is done, anything in it means work is still in flight that
+/// will wake the session again. What the entries say is not read.
+pub fn array_has_items(text: &str, key: &str) -> Option<bool> {
+    let needle = format!("\"{}\"", key);
+    let mut from = 0;
+    while let Some(at) = text[from..].find(&needle) {
+        let after = &text[from + at + needle.len()..];
+        if let Some(rest) = after.trim_start().strip_prefix(':') {
+            if let Some(rest) = rest.trim_start().strip_prefix('[') {
+                return Some(!rest.trim_start().starts_with(']'));
+            }
+        }
+        from += at + needle.len();
+    }
+    None
+}
+
 /// `first`, with an absent field as the empty string.
 ///
 /// The transcript readers want a `String` they can compare against a literal,
@@ -120,6 +141,18 @@ mod tests {
         let listed = r#"{"fields":["permission_mode"],"permission_mode":"plan"}"#;
         assert_eq!(scan(listed, "permission_mode").as_deref(), Some("plan"));
         assert_eq!(first(listed, "permission_mode"), None);
+    }
+
+    #[test]
+    fn an_array_is_empty_or_not() {
+        let done = r#"{"hook_event_name":"Stop","background_tasks":[],"session_crons":[]}"#;
+        assert_eq!(array_has_items(done, "background_tasks"), Some(false));
+        let busy = r#"{"background_tasks":[ {"id":"t1","type":"shell","status":"running"} ]}"#;
+        assert_eq!(array_has_items(busy, "background_tasks"), Some(true));
+        assert_eq!(array_has_items(r#"{"a":1}"#, "background_tasks"), None);
+        // the key quoted as somebody's value, then the real one
+        let decoy = r#"{"fields":["background_tasks"],"background_tasks":[ ]}"#;
+        assert_eq!(array_has_items(decoy, "background_tasks"), Some(false));
     }
 
     #[test]

@@ -504,9 +504,12 @@ pub fn install_hooks(exe: &str) -> i32 {
     // The two tool events carry no `matcher`, which is what the entry below
     // writes, and a matcher-less entry fires for every tool: checked against a
     // live session rather than assumed, since a matcher that matched nothing
-    // would register cleanly and then simply never fire.
-    const EVENTS: &str =
-        "SessionStart UserPromptSubmit Stop PermissionRequest SessionEnd PostToolUse PostToolUseFailure";
+    // would register cleanly and then simply never fire. `Notification` goes in
+    // matcher-less too, and the hook ignores every kind but the three that say a
+    // dialog is on screen. `StopFailure` is the `Stop` an API error sends
+    // instead.
+    const EVENTS: &str = "SessionStart UserPromptSubmit Stop PermissionRequest SessionEnd \
+                          PostToolUse PostToolUseFailure Notification StopFailure";
     let home = std::env::var("HOME").unwrap_or_default();
     let dir = std::env::var("CLAUDE_CONFIG_DIR").unwrap_or_else(|_| format!("{}/.claude", home));
     let settings = PathBuf::from(&dir).join("settings.json");
@@ -564,7 +567,10 @@ pub fn install_hooks(exe: &str) -> i32 {
         EVENTS,
         settings.display()
     );
-    println!("Sessions already running keep reporting nothing until they restart.");
+    // Claude Code watches its settings files, so this needs no restart: a probe
+    // session given a hook three seconds after it started ran it on its next
+    // prompt, and on the notification after that.
+    println!("Sessions already running pick it up from their next event.");
     0
 }
 
