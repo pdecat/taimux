@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.0](https://github.com/pdecat/taimux/compare/v0.16.0...v0.17.0) (2026-09-22)
+
+
+### Features
+
+* taimux state explains why a pane reads the way it does ([dcd4e49](https://github.com/pdecat/taimux/commit/dcd4e499aed221edc12c946935081338712c3cf8))
+
+
+### Bug fixes
+
+* the state follows interrupts, background work and hidden dialogs ([58e303f](https://github.com/pdecat/taimux/commit/58e303f5c82146485b212f05adfe6af89c1a0fbd))
+
 ## [0.16.0](https://github.com/pdecat/taimux/compare/v0.15.1...v0.16.0) (2026-09-21)
 
 
