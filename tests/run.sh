@@ -1262,8 +1262,7 @@ else
   ptmux new-session -d -x 120 -y 24 \
     "TAIMUX_SELF=$PT/none TAIMUX_SEARCH=0 TAIMUX_SESSIONS=1 TAIMUX_REMOTE=0 \
      XDG_RUNTIME_DIR=$PT/run $KBIN tui >$PT/chosen 2>$PT/err" 2>/dev/null
-  # Let the first scan land before leaving the live list: landing after, it
-  # would stand in for the past rows until the next tick.
+  # Up, with its first scan in, before any key is sent.
   n=0; while [ "$n" -lt 60 ] && ! pscreen | grep -q 'No agent sessions'; do n=$((n+1)); sleep 0.05; done
   ptmux send-keys BTab 2>/dev/null
   pexpect "the past list opens newest first"   "trial,restart,apple,cherry"

@@ -729,7 +729,16 @@ struct App {
     preview: bool,
     query: String,
     width: usize,
+    /// The pane rows, as the last scan brought them back.
     tsv: String,
+    /// The past list's rows, as the sessions cache last gave them.
+    ///
+    /// Its own buffer because it is its own list, not the panes filtered. The
+    /// two used to share one, and that is how a scan still out when Tab reached
+    /// this list landed on top of it: "past sessions" showed live panes until
+    /// the next tick, and going back the other way drew the past rows under the
+    /// live label until a scan came back.
+    past: String,
     all: Vec<rows::Row>,
     view: Vec<usize>,
     sel: usize,
@@ -1154,11 +1163,12 @@ impl App {
     /// Rows now, on this thread. Startup and the ended list only: everything the
     /// loop does goes through `start_refresh` instead.
     fn fetch(&mut self) {
-        self.tsv = match self.mode {
-            Mode::Dead => self.src.ended.as_ref().map(|f| f()).unwrap_or_default(),
-            _ => (self.src.fetch)(),
-        };
-        self.hold_restarting();
+        if self.mode == Mode::Dead {
+            self.past = self.src.ended.as_ref().map(|f| f()).unwrap_or_default();
+        } else {
+            self.tsv = (self.src.fetch)();
+            self.hold_restarting();
+        }
     }
 
     /// Ask for rows on a worker thread, leaving the loop free to draw and to
@@ -1211,6 +1221,8 @@ impl App {
                     log_slow(&r);
                 }
                 self.client = r.client;
+                // Pane rows, whichever list is on screen. One that lands under
+                // the past list goes where it belongs and waits for the Tab back.
                 self.tsv = r.tsv;
                 self.hold_restarting();
                 self.pending = None;
@@ -1298,6 +1310,10 @@ impl App {
     ///
     /// Called BEFORE the restart is fired, because afterwards the row it needs to
     /// remember may already be gone.
+    ///
+    /// Only ever a PANE row. ctrl-x on a past row explains itself and restarts
+    /// nothing, and holding one anyway painted it ↻ and, after a Tab to a live
+    /// list, put it back among the panes for as long as the hold lasted.
     fn hold(&mut self, id: &str) {
         if let Some((idx, line)) = self
             .tsv
@@ -1339,13 +1355,13 @@ impl App {
         // The ended list is a different list, not this one filtered, so its own
         // rows are already only ended ones and asking for the filter as well
         // would be asking twice.
-        let only = if self.mode == Mode::Dead {
-            ""
+        let (lines, only) = if self.mode == Mode::Dead {
+            (&self.past, "")
         } else {
-            self.mode.filter()
+            (&self.tsv, self.mode.filter())
         };
         self.all = rows::build(
-            &self.tsv,
+            lines,
             &rows::Input {
                 cur: &self.src.cur,
                 width: self.width,
@@ -1461,6 +1477,19 @@ impl App {
         }
     }
 
+    /// Where the first scan puts the cursor: on the pane the picker was opened
+    /// from, and when that pane is not an agent session at all, which is what F1
+    /// from a shell is, on the row nearest to where it is.
+    ///
+    /// Not on the past list. A scan that lands there is one Tab was pressed
+    /// ahead of, its rows are not on screen, and moving the cursor anyway is a
+    /// jump through a list the scan has nothing to do with.
+    fn open_on(&mut self, id: &str) {
+        if self.mode != Mode::Dead && !self.focus(id) {
+            self.focus_nearest();
+        }
+    }
+
     fn selected(&self) -> Option<&rows::Row> {
         self.view.get(self.sel).map(|&i| &self.all[i])
     }
@@ -1535,6 +1564,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
         query: String::new(),
         width: row_width(term.size()?.width),
         tsv: String::new(),
+        past: String::new(),
         all: Vec::new(),
         view: Vec::new(),
         sel: 0,
@@ -1765,11 +1795,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
             app.rebuild();
             if !opened {
                 opened = true;
-                // …and when that pane is not an agent session at all, which is
-                // what F1 from a shell is, the row nearest to where it is.
-                if !app.focus(&opening_on) {
-                    app.focus_nearest();
-                }
+                app.open_on(&opening_on);
             }
             // The terminal has grown past what this popup was asked for, and
             // tmux will not grow a popup on its own. Leaving the loop is how the
@@ -2100,6 +2126,7 @@ mod tests {
             query: String::new(),
             width: 100,
             tsv: String::new(),
+            past: String::new(),
             all: Vec::new(),
             view: Vec::new(),
             sel: 0,
@@ -2144,6 +2171,7 @@ mod tests {
             query: String::new(),
             width: 100,
             tsv: String::new(),
+            past: String::new(),
             all: Vec::new(),
             view: Vec::new(),
             sel: 0,
@@ -2908,6 +2936,71 @@ mod tests {
         a.rebuild();
         assert!(!a.dated(), "a live list is never in date order");
         assert_eq!(ids(&a), ["%2", "%1"], "so a query still ranks it");
+    }
+
+    /// The race the past list's own buffer is for. A scan still out when Tab
+    /// reaches that list lands afterwards, and it used to land ON it: "past
+    /// sessions" showed live panes until the next tick.
+    #[test]
+    fn a_scan_that_lands_after_tab_leaves_the_past_list_alone() {
+        let mut a = app(THREE);
+        a.src.ended = Some(Box::new(|| PAST.to_string()));
+        a.src.fetch = Arc::new(|| {
+            std::thread::sleep(Duration::from_millis(150));
+            THREE.to_string()
+        });
+        a.start_refresh();
+        a.step_mode(true); // shift-tab from the first stop is the past list
+        assert_eq!(a.mode, Mode::Dead);
+        let past = ids(&a);
+        assert_eq!(past.len(), 4);
+        let mut landed = false;
+        for _ in 0..100 {
+            if a.take_refresh() {
+                landed = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(landed, "the scan never arrived");
+        a.rebuild();
+        assert_eq!(ids(&a), past, "the past list is still the past list");
+    }
+
+    /// …and the other way round. Leaving the past list used to draw ITS rows
+    /// under the live label until a scan came back; the panes last seen are
+    /// there at once instead.
+    #[test]
+    fn leaving_the_past_list_shows_the_panes_at_once() {
+        let mut a = app_past("");
+        a.step_mode(false); // tab from the last stop is back to all
+        assert_eq!(a.mode, Mode::All);
+        assert_eq!(ids(&a), ["%1", "%2", "%3"]);
+    }
+
+    /// ctrl-x on a past row restarts nothing, so it holds nothing either. Held,
+    /// it was painted ↻, and a Tab to a live list put it among the panes.
+    #[test]
+    fn ctrl_x_on_a_past_row_holds_nothing() {
+        let mut a = app_past("");
+        a.hold("dead:claude:/o.jsonl");
+        assert!(a.restarting.is_empty());
+    }
+
+    /// The first scan places the cursor by the pane the picker was opened from,
+    /// but not when it lands under the past list: none of the rows there is a
+    /// pane, and moving the cursor anyway is a jump nobody asked for.
+    #[test]
+    fn the_first_scan_leaves_the_cursor_alone_on_the_past_list() {
+        let mut a = app_past("");
+        a.src.cur_cwd = "/h/c".into();
+        a.open_on("%9");
+        assert_eq!(a.sel, 0, "not moved to the row in that directory");
+        // on a list of panes it does what it always did
+        let mut b = app(TREE);
+        b.src.cur_cwd = "/h/proj/web".into();
+        b.open_on("%404");
+        assert_eq!(on(&b), "%2");
     }
 
     /// The list ctrl-x and F8 act on, gathered in one place. It crosses the four
