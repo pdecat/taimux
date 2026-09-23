@@ -163,6 +163,16 @@ The ring is short enough that the list you want is as often the one behind you a
 the one ahead, and overshooting the waiting list by one press used to cost four
 more to come back to it.
 
+**Ctrl-s** puts the idle list in the order its sessions last said something,
+newest first, and the border says `by date` while it is on: the session you left
+waiting a minute ago comes first, the one forgotten since yesterday last. "Last
+said something" is the newest turn in the session's transcript, its last message,
+and not when its hook line was written, because a resumed session rewrites that
+line with nothing said at all. Only claude reports it, so a session of any other
+agent keeps its place after every dated one, as does one on a host whose taimux
+predates the field. The same key sorts the [past list](#newest-first-or-best-match-first)
+by date, and a query keeps the order it sets.
+
 The border label names the list you are looking at, and the mode is kept across a
 refresh (by hand or on the timer), so a picker left open on the waiting list is a
 live list of the sessions that want an answer, one that empties itself as you deal
@@ -293,7 +303,8 @@ goes. None of it is required: with no hook installed every row still comes off
 so far.
 
 When a row reads wrong, `taimux state <pane>` prints every input behind it: the
-hook line and its age, the newest turn record in the transcript, what the screen
+hook line and its age, the newest turn record in the transcript, when the session
+last said something (what `Ctrl-s` sorts the idle list on), what the screen
 shows, and what those come to:
 
 ```
@@ -302,6 +313,7 @@ pane        %34, claude pid 3876934
 hook line   run (mode auto), written 6s ago
 transcript  Interrupt 1s ago, /home/you/.claude/projects/-home-you-src-app/27266dd7-….jsonl
 corrected   idle (the transcript is newer than the line)
+last said   1s ago
 screen      idle: prompt box shown, turn line Done
 reading     idle
 ```
@@ -550,7 +562,7 @@ Inside the picker:
 |----------------|---------------------------------|
 | type           | filter on what each row shows |
 | `Ctrl-t`       | …and on [what was said inside each session](#searching-what-a-session-said) |
-| `Ctrl-s`       | in the [past](#past-sessions) list, keep what the query matches [newest first](#newest-first-or-best-match-first) rather than best match first |
+| `Ctrl-s`       | in the [idle](#what-a-session-is-doing) and [past](#newest-first-or-best-match-first) lists, order by when each session last said something, newest first |
 | `↑` / `↓`      | move (wraps around at the ends) |
 | `Ctrl-j` / `Ctrl-k` | same, and `Ctrl-n` / `Ctrl-p` too |
 | `PgUp` / `PgDn`| move a screenful (stops at the ends, it does not wrap) |
@@ -965,10 +977,10 @@ conversation you want can sit under older ones that happen to match it more
 tightly.
 
 **`Ctrl-s`** keeps the matches in date order instead, and the border says
-`by date` while it is on. It is bound on this list alone, the only one with a
-date to sort by, and it stays on through `Tab`, like `Ctrl-t`. The cursor stays
-on the conversation it was on, so a second press puts you back exactly where the
-first one started.
+`by date` while it is on. It is bound on this list and on the
+[idle](#what-a-session-is-doing) one, the two with a date worth sorting by, and
+it stays on through `Tab`, like `Ctrl-t`. The cursor stays on the conversation
+it was on, so a second press puts you back exactly where the first one started.
 
 It is **not** "leave every match where it stands", which is what fzf's
 `--no-sort` does and what was tried first. The ranking was doing a second job
@@ -1207,6 +1219,14 @@ the side that can actually see them, and the local tool only merges the replies.
 That is also why `list` is deliberately local-only: it is the wire format, so a
 host answering with remotes of its own is what would make a cycle (two boxes
 ssh'd into each other) possible, and it simply cannot.
+
+Being the wire format, it also keeps its shape. A picker keeps only rows of the
+eight fields it knows and says "its taimux answers in another format" for the
+rest, so `list` prints those eight, and the ninth, when each session last said
+something (what `Ctrl-s` sorts the idle list on), only to a picker that asks with
+`list --since`. A taimux too old to know the flag ignores it, since `list` reads
+no arguments, and answers the eight it always did: its sessions are listed as
+before and simply sort after the dated ones.
 
 **Enter** puts that host's tmux on the pane you picked, *then* takes you to the
 pane ssh is running in, so the window is already right when you land. The remote
@@ -1566,7 +1586,11 @@ of its own: a daemon left listening by the previous build answers rows that are
 still perfectly well-formed, just made by the code that shipped before. So the
 request the picker uses (`rows`) answers with the daemon's own version on the
 first line, and a daemon too old to know the word answers the protocol's
-`!unknown request`, which is the same refusal.
+`!unknown request`, which is the same refusal. The line names the **shape** of
+the rows as well (`rows/2`), because the version alone cannot catch a build from
+the checkout: it changes the rows without a release to bump the version, and a
+daemon the build before left running would otherwise go on serving rows short of
+the field the new picker sorts on.
 
 Refusing it is not enough on its own, and this is the half that is easy to miss:
 being *asked* is what keeps a daemon from being idle, so a picker that merely

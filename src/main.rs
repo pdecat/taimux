@@ -626,6 +626,11 @@ fn sh_quote(s: &str) -> String {
     s.replace('\'', "'\\''")
 }
 
+/// Whether `list` was asked for the ninth field, `taimux list --since`.
+fn since_asked() -> bool {
+    std::env::args().skip(2).any(|a| a == "--since")
+}
+
 /// The other half of a resize: open the new popup once the old one is gone.
 ///
 /// Its own entry point because it has to outlive the picker that asked for it,
@@ -758,6 +763,12 @@ fn state_report(id: &str) -> i32 {
             );
         }
     }
+    // What ctrl-s sorts the idle list on, so an order that looks wrong can be
+    // read off here the way a state that looks wrong can.
+    match current.as_ref().map(|c| c.last).filter(|&t| t > 0) {
+        Some(t) => println!("last said   {}", ago(t)),
+        None => println!("last said   not known without a hook line from this process"),
+    }
     let screen = taimux_core::tmux::capture(id).unwrap_or_default();
     let lines: Vec<&str> = screen.lines().collect();
     println!(
@@ -824,21 +835,25 @@ fn main() {
         //
         // `list-local` is the same thing with the daemon never asked, which is
         // what the differentials and the golden replay want.
+        //
+        // Both print the eight fields every taimux reads, and `--since` adds the
+        // ninth, when each session last said something: another host's picker
+        // drops a row of any other shape, so the field is only sent to one that
+        // asks for it. See `panes::wire`.
         "list" => {
-            match taimux_daemon::protocol::rows() {
-                Some(body) => print!("{}", body),
-                None => {
-                    let mut p = taimux_core::version::Prober::new();
-                    let mut c = HashMap::new();
-                    print!("{}", taimux_core::panes::list_rows(&mut p, &mut c));
-                }
-            }
+            let rows = taimux_daemon::protocol::rows().unwrap_or_else(|| {
+                let mut p = taimux_core::version::Prober::new();
+                let mut c = HashMap::new();
+                taimux_core::panes::list_rows(&mut p, &mut c)
+            });
+            print!("{}", taimux_core::panes::wire(&rows, since_asked()));
             0
         }
         "list-local" => {
             let mut p = taimux_core::version::Prober::new();
             let mut c = HashMap::new();
-            print!("{}", taimux_core::panes::list_rows(&mut p, &mut c));
+            let rows = taimux_core::panes::list_rows(&mut p, &mut c);
+            print!("{}", taimux_core::panes::wire(&rows, since_asked()));
             0
         }
         // No daemon needed: the same scan, run in-process. This is what makes the

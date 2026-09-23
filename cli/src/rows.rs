@@ -104,6 +104,11 @@ pub struct Row {
     /// Set for a session on another machine. capture-pane only works where the
     /// pane is, so the preview has to ask over there rather than locally.
     pub host: String,
+    /// When the session last said something, in epoch milliseconds, which is
+    /// what the idle and past lists sort on by date. None where nothing tells:
+    /// an agent other than claude, a claude with no hook line, or another host
+    /// whose taimux predates the field.
+    pub since: Option<i64>,
 }
 
 impl Row {
@@ -332,6 +337,7 @@ struct Item {
     /// The whole thing, as the preview header shows it.
     cwd: String,
     session: String,
+    since: Option<i64>,
 }
 
 #[derive(Default)]
@@ -435,6 +441,9 @@ pub fn build(lines: &str, input: &Input) -> Vec<Row> {
             path: path_display(cwd, input.home),
             cwd: cwd.to_string(),
             session,
+            // A ninth field, where the row has one: `-` or nothing at all is
+            // "not known", and so is anything that is not a number.
+            since: f.get(8).and_then(|s| s.parse().ok()),
         });
     }
 
@@ -625,6 +634,7 @@ pub fn build(lines: &str, input: &Input) -> Vec<Row> {
             target: it.target.clone(),
             cwd: it.cwd.clone(),
             host: it.host.clone(),
+            since: it.since,
         });
     }
     out
@@ -1094,5 +1104,24 @@ mod tests {
         );
         assert!(r[0].plain().contains("proj/web"));
         assert!(!r[0].plain().contains('⌕'));
+    }
+
+    /// When a session last said something rides in a ninth field, and a row
+    /// without one, from an older host or an agent that cannot say, is read as
+    /// not knowing rather than refused. Nothing about it is drawn.
+    #[test]
+    fn the_last_message_is_read_off_a_ninth_field_when_there_is_one() {
+        let rows = "%1\tw:1.1\t/a\tclaude\t2.1\tidle\t-\tone\t1700000000000\n\
+                    %2\tw:2.1\t/b\tcodex\t0.9\tidle\t-\ttwo\t-\n\
+                    %3\tw:3.1\t/c\tclaude\t2.1\tidle\t-\tthree\n";
+        let r = build(rows, &Input::default());
+        let since: Vec<Option<i64>> = r.iter().map(|r| r.since).collect();
+        assert_eq!(since, [Some(1_700_000_000_000), None, None]);
+        let eight = build(&taimux_core::panes::wire(rows, false), &Input::default());
+        assert_eq!(
+            r.iter().map(Row::plain).collect::<Vec<_>>(),
+            eight.iter().map(Row::plain).collect::<Vec<_>>(),
+            "the field changes nothing on screen"
+        );
     }
 }

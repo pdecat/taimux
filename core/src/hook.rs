@@ -337,6 +337,9 @@ pub struct Entry {
     /// When the line was written, in epoch milliseconds: what the transcript's
     /// own timestamps are measured against.
     pub at: i64,
+    /// When the session last said something, in epoch milliseconds. See
+    /// `last_said`; `hook_entry` alone can only offer the line's own mtime.
+    pub last: i64,
 }
 
 /// The hook line a session wrote about itself, as it stands on disk.
@@ -363,7 +366,20 @@ pub fn hook_entry(pane_id: &str, pid: i32) -> Option<Entry> {
         state: hstate.to_string(),
         mode: mode.to_string(),
         at,
+        last: at,
     })
+}
+
+/// When a session last said something, in epoch milliseconds: the newest record
+/// in its transcript that opened or closed a turn, which for a session idle at
+/// its prompt is its last message.
+///
+/// The line's own mtime stands in only where the transcript has no answer. It is
+/// not the better reading when it is newer, because a line is rewritten without
+/// anything being said: a resumed session writes one the moment it starts, and a
+/// sort on that would put every session a restart touched at the top.
+pub fn last_said(line_at: i64, turn: Option<(crate::turn::Event, i64)>) -> i64 {
+    turn.map_or(line_at, |(_, at)| at)
 }
 
 /// The hook line, brought up to date by the session's transcript wherever the
@@ -381,6 +397,7 @@ pub fn current(pane_id: &str, pid: i32) -> Option<Entry> {
     if let Some(r) = crate::conv::resolve_from_pane(pane_id, &cwd, pid) {
         let turn = crate::turn::last_event_in(&r.transcript);
         e.state = crate::state::correct(&e.state, e.at, turn).to_string();
+        e.last = last_said(e.at, turn);
     }
     Some(e)
 }
@@ -726,5 +743,17 @@ mod tests {
         );
         let sub = r#"{"session_id":"s","agent_id":"a1","agent_type":"general-purpose","hook_event_name":"PostToolUse","tool_input":{}}"#;
         assert_eq!(json_str(head(sub), "agent_id").as_deref(), Some("a1"));
+    }
+
+    /// The last message is the transcript's newest turn record, even when the
+    /// line is newer: a resumed session rewrites its line with nothing said, and
+    /// it must not jump to the top of a list sorted by when sessions last spoke.
+    #[test]
+    fn the_last_message_is_the_transcripts_word_over_the_lines() {
+        use crate::turn::Event;
+        assert_eq!(last_said(5_000, Some((Event::Over, 3_000))), 3_000);
+        assert_eq!(last_said(1_000, Some((Event::Interrupt, 3_000))), 3_000);
+        // …and the line only where the transcript gives no answer at all
+        assert_eq!(last_said(5_000, None), 5_000);
     }
 }

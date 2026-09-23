@@ -181,11 +181,17 @@ pub fn tmux_panes() -> Vec<Pane> {
 
 // ---- moved out of main.rs: composing the rows a pane scan turns into.
 /// The full row the picker consumes:
-///   pane_id \t target \t cwd \t agent \t version \t state \t mode \t title
+///   pane_id \t target \t cwd \t agent \t version \t state \t mode \t title \t last
 ///
-/// Only the trailing title may be empty. Every earlier field carries a
-/// placeholder instead, because bash's `read` collapses runs of tabs and a blank
-/// field would silently shift every field after it.
+/// `last` is when the session last said something, in epoch milliseconds (see
+/// `hook::last_said`), or `-` where nothing tells: only claude reports it, and
+/// only through its hook line. It rides at the END so that everything reading
+/// the first eight fields by position reads them as it always did, and it stays
+/// out of what another host is sent unless that host asks: see `wire`.
+///
+/// Only the title may be empty. Every other field carries a placeholder instead,
+/// because bash's `read` collapses runs of tabs and a blank field would silently
+/// shift every field after it.
 pub fn list_rows(
     prober: &mut crate::version::Prober,
     captures: &mut HashMap<String, String>,
@@ -211,6 +217,10 @@ pub fn list_rows(
         };
         let hook = crate::hook::current(id, pid);
         let merged = crate::state::merge(&screen, hook.as_ref().map(|e| e.state.as_str()));
+        let last = hook
+            .as_ref()
+            .filter(|e| e.last > 0)
+            .map_or_else(|| "-".to_string(), |e| e.last.to_string());
         let mode = hook.map(|e| e.mode).unwrap_or_else(|| "-".into());
 
         let exe = std::fs::read_link(format!("/proc/{}/exe", pid))
@@ -226,7 +236,7 @@ pub fn list_rows(
         };
 
         s.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
             id,
             target,
             cwd,
@@ -234,10 +244,31 @@ pub fn list_rows(
             ver.unwrap_or_default(),
             merged.as_str(),
             mode,
-            title
+            title,
+            last
         ));
     }
     s
+}
+
+/// The rows as `taimux list` prints them: the eight fields every taimux reads,
+/// and the ninth only when asked for.
+///
+/// `list` is the wire format, and another host's picker keeps only rows of
+/// exactly eight fields, calling anything else "another format" and dropping it.
+/// So the extra field would blank this host out of every picker that has not
+/// upgraded yet. A picker that knows the field asks with `list --since`, which a
+/// taimux too old to know the flag ignores, answering the eight it always did.
+pub fn wire(rows: &str, since: bool) -> String {
+    if since {
+        return rows.to_string();
+    }
+    let mut out = String::with_capacity(rows.len());
+    for line in rows.lines() {
+        out.push_str(&line.split('\t').take(8).collect::<Vec<_>>().join("\t"));
+        out.push('\n');
+    }
+    out
 }
 
 /// What the session in one pane is doing, read exactly as the list reads it:
@@ -397,5 +428,24 @@ mod tests {
         p.cwd = String::new();
         let fgs = vec![fg("pts/5", 5, "claude")];
         assert!(agent_row(&p, &fgs).unwrap().contains("\t?\t"));
+    }
+
+    /// `list` sends another host the eight fields every taimux reads, since an
+    /// older picker drops a row of any other shape, and the ninth only to a
+    /// picker that asked for it.
+    #[test]
+    fn the_wire_carries_eight_fields_unless_the_ninth_is_asked_for() {
+        let rows = "%1\tw:1.1\t/a\tclaude\t2.1\tidle\t-\tsome title\t1700000000000\n\
+                    %2\tw:2.1\t/b\tcodex\t0.9\trun\t-\t\t-\n";
+        let plain = wire(rows, false);
+        assert_eq!(
+            plain,
+            "%1\tw:1.1\t/a\tclaude\t2.1\tidle\t-\tsome title\n\
+             %2\tw:2.1\t/b\tcodex\t0.9\trun\t-\t\n"
+        );
+        assert!(plain.lines().all(|l| l.split('\t').count() == 8));
+        assert_eq!(wire(rows, true), rows);
+        // rows already in the old shape go through untouched
+        assert_eq!(wire(&plain, false), plain);
     }
 }

@@ -349,14 +349,14 @@ pub fn dead_rows(now: i64) -> String {
     past_rows(sessions(), now)
 }
 
-/// The rows themselves, **newest first**, whatever order they were read in.
+/// The rows themselves, **newest first**, whatever order they were read in, each
+/// carrying when it last said something in the ninth field a pane row has, in
+/// epoch milliseconds, which is what the picker's by-date order sorts on.
 ///
-/// The indexer already writes the cache that way, and this sorts again anyway,
-/// because the picker's by-date order is this list's order: once the rows that
-/// say what was typed are put ahead of the loose matches, every row stays where
-/// this puts it. A promise that visible is kept where it is made, not left to
-/// whichever writer the cache last had. Same tie-break as the indexer's, so the
-/// two can never disagree about a row.
+/// The indexer already writes the cache newest first, and this sorts again anyway:
+/// it is the order the list opens in, a promise visible enough to be kept where it
+/// is made rather than left to whichever writer the cache last had. Same tie-break
+/// as the indexer's, so the two can never disagree about a row.
 fn past_rows(mut all: Vec<Session>, now: i64) -> String {
     all.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.key.cmp(&b.key)));
     let mut s = String::new();
@@ -371,13 +371,14 @@ fn past_rows(mut all: Vec<Session>, now: i64) -> String {
         };
         let cwd = if e.cwd.is_empty() { "?" } else { &e.cwd };
         s.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\tdead\t-\t{}\n",
+            "{}\t{}\t{}\t{}\t{}\tdead\t-\t{}\t{}\n",
             past_id(&e.agent, &e.key),
             age(e.mtime, now),
             cwd,
             e.agent,
             e.version,
-            title
+            title,
+            e.mtime * 1000
         ));
     }
     s
@@ -425,9 +426,9 @@ mod tests {
         }
     }
 
-    /// Newest first whatever order the cache holds them in, since the picker's
-    /// by-date order rests on this list's own. Ties go by key, as the indexer
-    /// breaks them, and a conversation open in a pane stays out.
+    /// Newest first whatever order the cache holds them in, since that is the
+    /// order the list opens in. Ties go by key, as the indexer breaks them, and a
+    /// conversation open in a pane stays out.
     #[test]
     fn past_rows_come_newest_first_whatever_order_they_were_read_in() {
         let now = 100_000;
@@ -451,6 +452,11 @@ mod tests {
                 "dead:claude:/old"
             ]
         );
+        // …each carrying its date, in milliseconds like a live row's, after the
+        // eight fields every reader of a row already knows
+        let first: Vec<&str> = rows.lines().next().unwrap().split('\t').collect();
+        assert_eq!(first.len(), 9);
+        assert_eq!(first[8], ((now - 60) * 1000).to_string());
     }
 
     #[test]

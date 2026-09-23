@@ -25,6 +25,17 @@ use taimux_core::{panes, paths, version};
 /// the daemon crate's own version IS the binary's.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The shape of the rows this build serves, which the `rows` handshake names
+/// beside the version.
+///
+/// The version alone cannot say it. A build from the checkout changes the rows
+/// without a release to bump the version, so a daemon the build before started
+/// would pass the check and go on serving the old shape: rows still well-formed,
+/// only missing what the new picker reads, with nothing to show it but a sort
+/// that quietly stopped doing anything. Bump it whenever a row gains, loses or
+/// moves a field.
+const SHAPE: &str = "rows/2";
+
 const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 /// How often the loop looks up from waiting to ask whether it has been idle long
 /// enough to exit. Nothing waits on this: a request wakes the loop immediately.
@@ -72,7 +83,12 @@ fn handle(
         // because the two have to describe the SAME answer: a daemon replaced
         // between the two calls would pass the check and then serve rows from
         // the other build.
-        "rows" => format!("{}\n{}", VERSION, panes::list_rows(prober, captures)),
+        "rows" => format!(
+            "{} {}\n{}",
+            VERSION,
+            SHAPE,
+            panes::list_rows(prober, captures)
+        ),
         "version" => format!("{}\n", VERSION),
         "ping" => "pong\n".to_string(),
         "quit" => "bye\n".to_string(),
@@ -212,7 +228,7 @@ pub fn rows() -> Option<String> {
 fn rows_at(path: &Path) -> Option<String> {
     let body = ask_at(path, "rows")?;
     let (ver, rows) = body.split_once('\n')?;
-    if ver != VERSION {
+    if ver.split_once(' ') != Some((VERSION, SHAPE)) {
         // …and ask it to stand down, or nothing ever replaces it. A daemon goes
         // home after five idle minutes, but being ASKED is what keeps it from
         // being idle, and a picker refusing this one is still asking it every
@@ -269,6 +285,11 @@ mod tests {
     /// A daemon that answers one request with whatever it was given, so the
     /// client half can be driven without a real one. Its own socket, so nothing
     /// here touches `TAIMUX_SOCKET` or the developer's live daemon.
+    /// A `rows` answer from a daemon running this very build.
+    fn this_build(rows: &str) -> &'static str {
+        Box::leak(format!("{} {}\n{}", VERSION, SHAPE, rows).into_boxed_str())
+    }
+
     fn fake(reply: &'static str) -> (std::path::PathBuf, std::thread::JoinHandle<String>) {
         let (path, handle) = serve_replies(vec![reply]);
         (
@@ -313,7 +334,7 @@ mod tests {
 
     #[test]
     fn rows_come_back_from_a_daemon_on_this_version() {
-        let (path, srv) = fake(concat!(env!("CARGO_PKG_VERSION"), "\n%1\tw:1.1\t/h\n"));
+        let (path, srv) = fake(this_build("%1\tw:1.1\t/h\n"));
         assert_eq!(rows_at(&path).as_deref(), Some("%1\tw:1.1\t/h\n"));
         assert_eq!(srv.join().unwrap(), "rows", "one request, not a handshake");
         let _ = std::fs::remove_file(&path);
@@ -326,7 +347,7 @@ mod tests {
     /// listening.
     #[test]
     fn the_frames_trailing_blank_line_is_not_part_of_the_rows() {
-        let (path, srv) = fake(concat!(env!("CARGO_PKG_VERSION"), "\n%1\tw:1.1\t/h\n\n"));
+        let (path, srv) = fake(this_build("%1\tw:1.1\t/h\n\n"));
         assert_eq!(rows_at(&path).as_deref(), Some("%1\tw:1.1\t/h\n"));
         let _ = srv.join();
         let _ = std::fs::remove_file(&path);
@@ -355,6 +376,21 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// A daemon on this very version still serving the old row shape, which is
+    /// what a build from the checkout leaves running when it changes the rows
+    /// without a release: refused and stood down like any other build, or the
+    /// new picker would sort on a field its rows do not have.
+    #[test]
+    fn a_daemon_serving_the_old_row_shape_is_refused() {
+        let (path, srv) = fake_twice(
+            concat!(env!("CARGO_PKG_VERSION"), "\n%1\tw:1.1\t/h\n"),
+            "bye\n",
+        );
+        assert_eq!(rows_at(&path), None);
+        assert_eq!(srv.join().unwrap(), vec!["rows", "quit"]);
+        let _ = std::fs::remove_file(&path);
+    }
+
     /// A daemon too old to know the word answers the error the protocol already
     /// had, which `ask_at` turns into the same "do it yourself".
     #[test]
@@ -376,7 +412,7 @@ mod tests {
     /// would scan again behind it every refresh on an idle machine.
     #[test]
     fn a_daemon_with_no_rows_still_answers() {
-        let (path, srv) = fake(concat!(env!("CARGO_PKG_VERSION"), "\n\n"));
+        let (path, srv) = fake(this_build("\n"));
         assert_eq!(rows_at(&path).as_deref(), Some(""));
         let _ = srv.join();
         let _ = std::fs::remove_file(&path);

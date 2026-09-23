@@ -532,6 +532,10 @@ eq "the state marks them as ended"       "dead" \
    "$(printf '%s\n' "$DR" | awk -F'\t' '$1=="dead:claude:'"$A"'"{print $6}')"
 eq "an untitled one still says something" "the thing I asked it over two lines" \
    "$(printf '%s\n' "$DR" | awk -F'\t' '$1=="dead:claude:'"$C"'"{print $8}')"
+# When it stopped rides in a ninth field, in milliseconds like a live row's,
+# which is what Ctrl-s sorts the list on.
+eq "…and when it stopped is the ninth field, in milliseconds" "$(( $(stat -c %Y "$A") * 1000 ))" \
+   "$(printf '%s\n' "$DR" | awk -F'\t' '$1=="dead:claude:'"$A"'"{print $9}')"
 
 # Nothing scanned yet is a real state: the indexer runs behind the picker, so the
 # first time this mode is opened after a boot it can genuinely have nothing.
@@ -783,6 +787,10 @@ if [ -x "$WBIN" ]; then
     eq "…in the eight fields the picker reads" "8" \
        "$(printf '%s' "$OUT" | awk -F'\t' '{print NF; exit}')"
     hasnt "…and never a remote row of its own"  "$OUT" ":%"
+    # The ninth, when each session last said something, only for a picker that
+    # asks: an older one drops any row that is not eight fields.
+    eq "…and nine for a picker that asks with --since" "9" \
+       "$("$WBIN" list --since 2>&1 | awk -F'\t' '{print NF; exit}')"
   else
     skip "no agent panes on this machine to shape-check"
   fi
@@ -816,6 +824,11 @@ if [ -x "$WBIN" ]; then
          "$(printf '%s\n' "$DOUT" | awk 'NF==0' | wc -l | tr -d ' ')"
       eq "…in the same eight fields"           "8" \
          "$(printf '%s' "$DOUT" | awk -F'\t' '{print NF; exit}')"
+      # The daemon serves nine, and it is `list` that takes the ninth off: a
+      # socket answer that skipped the trim would reach another host as a row
+      # it drops.
+      eq "…and nine through it with --since"   "9" \
+         "$("$WBIN" list --since 2>&1 | awk -F'\t' '{print NF; exit}')"
     else
       skip "no agent panes here to shape-check the daemon's answer"
     fi
@@ -1287,6 +1300,72 @@ else
   eq "…and it chose nothing"                "" "$(cat "$PT/chosen" 2>/dev/null)"
   eq "…and said nothing on stderr"          "" "$(cat "$PT/err" 2>/dev/null)"
   ptmux kill-server 2>/dev/null
+fi
+
+# ============================================================================
+section "the idle list by date: ctrl-s orders it by the last message"
+# ============================================================================
+# The idle list comes in tmux order. Ctrl-s puts it in the order its sessions
+# last said something, newest first, which is the question an idle list gets
+# looked at with: which of these did I leave waiting most recently. The feed
+# answers nine fields, the way the local scan does, and one row says `-` for
+# an agent that cannot say.
+ISOCK="taimux-idletest-$$"
+itmux() { tmux -f /dev/null -L "$ISOCK" "$@"; }
+if [ ! -x "$KBIN" ]; then
+  skip "the idle list by date (no taimux built; run just build)"
+elif ! command -v tmux >/dev/null 2>&1; then
+  skip "the idle list by date (no tmux here to drive it in)"
+else
+  IT="$TMP/idle"; mkdir -p "$IT/run"
+  cat > "$IT/feed" <<'IFEED'
+#!/usr/bin/env bash
+[ "${1:-}" = _panes ] || exit 1
+printf '%%1\twork:1.1\t/tmp/p1\tclaude\t2.1.229\tidle\t-\tapple pie\t1000\n'
+printf '%%2\twork:2.1\t/tmp/p2\tclaude\t2.1.229\tidle\t-\tbanana bread\t3000\n'
+printf '%%3\twork:3.1\t/tmp/p3\tcodex\t0.9\tidle\t-\tcherry tart\t-\n'
+printf '%%4\twork:4.1\t/tmp/p4\tclaude\t2.1.229\tidle\t-\tdate loaf\t2000\n'
+printf '%%5\twork:5.1\t/tmp/p5\tclaude\t2.1.229\trun\t-\telder cake\t9000\n'
+IFEED
+  chmod +x "$IT/feed"
+
+  iscreen() { itmux capture-pane -p 2>/dev/null; }
+  # The rows in the order the list shows them, one word each, off screen rows 4
+  # to 11 of a 24-line window.
+  iorder() {
+    iscreen | sed -n '4,11p' |
+      grep -o 'apple pie\|banana bread\|cherry tart\|date loaf\|elder cake' |
+      awk '{ print $1 }' | paste -sd, -
+  }
+  iexpect() {  # $1 = what this proves, $2 = the order wanted
+    local n=0
+    while [ "$n" -lt 60 ]; do
+      [ "$(iorder)" = "$2" ] && { ok "$1"; return 0; }
+      n=$((n+1)); sleep 0.05
+    done
+    no "$1" "expected [$2] got [$(iorder)]"
+  }
+
+  itmux new-session -d -x 120 -y 24 \
+    "TAIMUX_SELF=$IT/feed TAIMUX_SEARCH=0 TAIMUX_SESSIONS=0 TAIMUX_REMOTE=0 \
+     XDG_RUNTIME_DIR=$IT/run $KBIN tui >$IT/chosen 2>$IT/err" 2>/dev/null
+  iexpect "the picker opens on every session, in tmux order" "apple,banana,cherry,date,elder"
+  hasnt "…with no ctrl-s on a list with no date to sort by" "$(iscreen | sed -n '3p')" "ctrl-s"
+  # Waiting, working, then idle.
+  itmux send-keys Tab Tab Tab 2>/dev/null
+  iexpect "the idle list is the idle four, in tmux order" "apple,banana,cherry,date"
+  has   "…and offers ctrl-s there"          "$(iscreen | sed -n '3p')" "ctrl-s: sort by date"
+  itmux send-keys C-s 2>/dev/null
+  iexpect "ctrl-s orders them by the last message, the one that cannot say last" \
+          "banana,date,apple,cherry"
+  has   "…the border says so"               "$(iscreen | sed -n '1p')" "by date"
+  itmux send-keys C-s 2>/dev/null
+  iexpect "a second press puts tmux order back" "apple,banana,cherry,date"
+  itmux send-keys Escape 2>/dev/null
+  n=0; while [ "$n" -lt 60 ] && itmux has-session 2>/dev/null; do n=$((n+1)); sleep 0.05; done
+  eq "…and it chose nothing"                "" "$(cat "$IT/chosen" 2>/dev/null)"
+  eq "…and said nothing on stderr"          "" "$(cat "$IT/err" 2>/dev/null)"
+  itmux kill-server 2>/dev/null
 fi
 
 # ============================================================================

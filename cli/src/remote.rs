@@ -56,6 +56,14 @@ pub fn remote_taimux() -> &'static str {
 /// old host with nothing to say. It stayed wrong for exactly that reason.
 const INDEX_DUMP_CMD: &str = "index-dump";
 
+/// What `fetch` asks a remote host for: its rows, with the ninth field saying
+/// when each session last said something.
+///
+/// A taimux too old to know `--since` ignores it, since `list` reads no
+/// arguments, and answers the eight fields it always did, which `render` takes
+/// as they are. So asking for more costs an older host nothing.
+const LIST_CMD: &str = "list --since";
+
 fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -302,7 +310,7 @@ pub fn hosts_cached(dir: &Path, panes: &[(String, String)]) -> Vec<String> {
 pub fn fetch(host: &str, dir: &Path) {
     let (rc, out) = ssh(
         host,
-        &format!("{} list", REMOTE_TAIMUX),
+        &format!("{} {}", REMOTE_TAIMUX, LIST_CMD),
         env::num("TAIMUX_SSH_TIMEOUT", 4),
     );
     let f = dir.join(host);
@@ -339,14 +347,16 @@ pub fn render(host: &str, dir: &Path) -> String {
             if line.is_empty() {
                 continue;
             }
-            if line.split('\t').count() == 8 {
+            // Eight fields from a host that predates `--since`, nine from one
+            // that answered it. Anything else is a shape this build cannot read.
+            if matches!(line.split('\t').count(), 8 | 9) {
                 s.push_str(&format!("{}:{}\n", host, line));
             } else {
                 bad += 1;
             }
         }
-        // An older taimux over there answers in another shape. Say so on one row
-        // rather than dropping its sessions silently.
+        // A taimux over there answers in another shape. Say so on one row rather
+        // than dropping its sessions silently.
         if bad > 0 {
             s.push_str(&format!(
                 "{}:!\t{}\t-\t-\t\tunknown\t-\tits taimux answers in another format ({} row(s) dropped)\n",
@@ -744,6 +754,25 @@ mod tests {
         let out = render("ha", &d);
         assert!(out.starts_with("ha:%6\tmain:1.7\t"));
         assert_eq!(out.lines().count(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A host that answered `list --since` sends a ninth field, when the session
+    /// last said something, and its rows are taken whole. One too old for the
+    /// flag answers the eight above, which is just as readable.
+    #[test]
+    fn a_reply_carrying_the_last_message_is_taken_whole() {
+        let d = fixture("n");
+        std::fs::write(
+            d.join("ha"),
+            "ok 100\n%6\tmain:1.7\t/w\tclaude\t2.1.1\tidle\t-\tover there\t1700000000000\n",
+        )
+        .unwrap();
+        assert_eq!(
+            render("ha", &d),
+            "ha:%6\tmain:1.7\t/w\tclaude\t2.1.1\tidle\t-\tover there\t1700000000000\n"
+        );
+        assert!(LIST_CMD.starts_with("list ") && LIST_CMD.ends_with(" --since"));
         let _ = std::fs::remove_dir_all(&d);
     }
 
