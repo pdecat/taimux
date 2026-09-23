@@ -559,6 +559,7 @@ fn restored_state() -> taimux_cli::tui::State {
         // what makes the struct free to build in the picker. One per process.
         mode: Box::leak(get("TAIMUX_STATE_MODE").into_boxed_str()),
         search: get("TAIMUX_STATE_SEARCH") == "1",
+        by_date: get("TAIMUX_STATE_BY_DATE") == "1",
         // Absent means an ordinary open, where the preview is on.
         preview: taimux_core::env::var("TAIMUX_STATE_PREVIEW").is_none_or(|v| v == "1"),
         on: get("TAIMUX_STATE_ON"),
@@ -593,9 +594,10 @@ fn reopen_popup(exe: &str, cur: &str, state: &taimux_cli::tui::State) {
     let _ = std::fs::write(
         &path,
         format!(
-            "mode\t{}\nsearch\t{}\npreview\t{}\non\t{}\nquery\t{}\n",
+            "mode\t{}\nsearch\t{}\nby_date\t{}\npreview\t{}\non\t{}\nquery\t{}\n",
             state.mode,
             state.search as u8,
+            state.by_date as u8,
             state.preview as u8,
             state.on,
             state.query.replace(['\n', '\r'], " "),
@@ -674,6 +676,8 @@ fn repopup(client: &str, cur: &str) -> i32 {
                 &format!("TAIMUX_STATE_MODE={}", field("mode")),
                 "-e",
                 &format!("TAIMUX_STATE_SEARCH={}", field("search")),
+                "-e",
+                &format!("TAIMUX_STATE_BY_DATE={}", field("by_date")),
                 "-e",
                 &format!("TAIMUX_STATE_PREVIEW={}", field("preview")),
                 "-e",

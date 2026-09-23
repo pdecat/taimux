@@ -346,8 +346,21 @@ pub fn dead_rows(now: i64) -> String {
         // it says so than that it looks like a box with no history in it.
         return "dead:!\t-\t-\t-\t\tdead\t-\tstill reading your conversations…\n".to_string();
     }
+    past_rows(sessions(), now)
+}
+
+/// The rows themselves, **newest first**, whatever order they were read in.
+///
+/// The indexer already writes the cache that way, and this sorts again anyway,
+/// because the picker's by-date order is this list's order: once the rows that
+/// say what was typed are put ahead of the loose matches, every row stays where
+/// this puts it. A promise that visible is kept where it is made, not left to
+/// whichever writer the cache last had. Same tie-break as the indexer's, so the
+/// two can never disagree about a row.
+fn past_rows(mut all: Vec<Session>, now: i64) -> String {
+    all.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.key.cmp(&b.key)));
     let mut s = String::new();
-    for e in sessions() {
+    for e in all {
         if e.pane != "-" {
             continue; // still open in a pane, and on every other list already
         }
@@ -397,6 +410,47 @@ mod tests {
         assert_eq!(age(0, 172800), "2d");
         // a clock that has gone backwards is not a negative age
         assert_eq!(age(2000, 1000), "now");
+    }
+
+    fn sess(mtime: i64, pane: &str, key: &str) -> Session {
+        Session {
+            mtime,
+            pane: pane.into(),
+            agent: "claude".into(),
+            key: key.into(),
+            cwd: "/w".into(),
+            version: "1".into(),
+            title: "t".into(),
+            src: "t".into(),
+        }
+    }
+
+    /// Newest first whatever order the cache holds them in, since the picker's
+    /// by-date order rests on this list's own. Ties go by key, as the indexer
+    /// breaks them, and a conversation open in a pane stays out.
+    #[test]
+    fn past_rows_come_newest_first_whatever_order_they_were_read_in() {
+        let now = 100_000;
+        let rows = past_rows(
+            vec![
+                sess(now - 90_000, "-", "/old"),
+                sess(now - 60, "-", "/new"),
+                sess(now - 3_600, "%4", "/open"),
+                sess(now - 7_200, "-", "/b"),
+                sess(now - 7_200, "-", "/a"),
+            ],
+            now,
+        );
+        let ids: Vec<&str> = rows.lines().filter_map(|l| l.split('\t').next()).collect();
+        assert_eq!(
+            ids,
+            [
+                "dead:claude:/new",
+                "dead:claude:/a",
+                "dead:claude:/b",
+                "dead:claude:/old"
+            ]
+        );
     }
 
     #[test]

@@ -497,20 +497,32 @@ fn now() -> i64 {
         .unwrap_or(0)
 }
 
-/// The rows the query keeps, best match first.
+/// The rows the query keeps: best match first, or `by_date` in the order the
+/// list already has, which on the past list is newest first.
 ///
 /// Terms are ANDed and their scores summed, which is fzf's extended-search
 /// default rather than one fuzzy match over the whole query. With no query the
 /// list keeps its own order; the sort is stable, so ties do too.
 ///
+/// By date is NOT fzf's `--no-sort`, which leaves every match where it stands.
+/// That was tried against the real history and is the version nobody wants: the
+/// letters of `ha-bert`, in order but scattered, are in a dozen rows that have
+/// nothing to do with it, and the ranking was all that kept those under the rows
+/// that actually SAY it. With it gone, the top of the list was all noise. So the
+/// rows holding every term as typed come first, newest first, and the loose
+/// matches follow, newest first too. The rows are the same either way; only
+/// their order changes.
+///
 /// The haystack is the row's PLAIN text: fzf is handed `--ansi` and has to parse
 /// our own colours back out to match on them, which is work this does not do.
-fn filter(list: &[rows::Row], query: &str, matcher: &SkimMatcherV2) -> Vec<usize> {
+fn filter(list: &[rows::Row], query: &str, matcher: &SkimMatcherV2, by_date: bool) -> Vec<usize> {
     let terms: Vec<&str> = query.split_whitespace().collect();
     if terms.is_empty() {
         return (0..list.len()).collect();
     }
-    let mut scored: Vec<(i64, usize)> = Vec::new();
+    // Folded, as the matcher ignores case too.
+    let folded: Vec<String> = terms.iter().map(|t| t.to_lowercase()).collect();
+    let mut kept: Vec<(i64, bool, usize)> = Vec::new();
     for (i, r) in list.iter().enumerate() {
         let hay = r.plain();
         let mut total = 0i64;
@@ -525,16 +537,33 @@ fn filter(list: &[rows::Row], query: &str, matcher: &SkimMatcherV2) -> Vec<usize
             }
         }
         if all {
-            scored.push((total, i));
+            let loose = by_date && {
+                let low = hay.to_lowercase();
+                !folded.iter().all(|t| low.contains(t.as_str()))
+            };
+            kept.push((total, loose, i));
         }
     }
-    scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
-    scored.into_iter().map(|(_, i)| i).collect()
+    if by_date {
+        kept.sort_by_key(|(_, loose, _)| *loose);
+    } else {
+        kept.sort_by_key(|(score, _, _)| Reverse(*score));
+    }
+    kept.into_iter().map(|(_, _, i)| i).collect()
 }
 
 /// What the picker says it can do. Only what is really bound: a header promising
 /// a key that does nothing is worse than a shorter one.
-fn header(script: bool, ended: bool, search_key: bool, search_on: bool) -> String {
+///
+/// `by_date` is None on every list but the past one, which is the only list with
+/// a date to sort by, and so the only one ctrl-s is bound on.
+fn header(
+    script: bool,
+    ended: bool,
+    search_key: bool,
+    search_on: bool,
+    by_date: Option<bool>,
+) -> String {
     let mut h = String::from("enter: switch");
     if ended {
         h.push_str("/resume");
@@ -546,6 +575,11 @@ fn header(script: bool, ended: bool, search_key: bool, search_on: bool) -> Strin
         } else {
             "   ctrl-t: search text"
         });
+    }
+    match by_date {
+        Some(true) => h.push_str("   ctrl-s: sort by date (on)"),
+        Some(false) => h.push_str("   ctrl-s: sort by date"),
+        None => {}
     }
     if script {
         // "outdated" and not "stale", which it said until the list of those rows
@@ -636,10 +670,18 @@ fn empty_note(
         .collect()
 }
 
-/// The border label: which list, whether the timer and text search are on, and
-/// whether a refresh is taking long enough to be worth mentioning.
-fn label(mode: Mode, live: bool, search: bool, refreshing: bool) -> String {
+/// The border label: which list and in what order, whether the timer and text
+/// search are on, and whether a refresh is taking long enough to be worth
+/// mentioning.
+fn label(mode: Mode, by_date: bool, live: bool, search: bool, refreshing: bool) -> String {
     let mut s = format!(" {}", mode.label());
+    // Straight after the name, since it says what order that list is in. Shown
+    // with no query too, where the order is the same either way: it is a
+    // setting, like ⌕, and a label that came and went as you typed would read
+    // as the order changing under you.
+    if by_date {
+        s.push_str(" · by date");
+    }
     if live {
         s.push_str(" · live");
     }
@@ -679,6 +721,11 @@ struct App {
     /// longer be read as Enter, see the module comment), but the port does not
     /// change behaviour; the rest of it lands in step 5.
     search: bool,
+    /// Keep the past list newest first while a query filters it, rather than
+    /// ranking the matches best first (loose matches still go last, see
+    /// `filter`). Only that list reads it, being the only one with a date to go
+    /// by, and it holds across Tab as `search` does.
+    by_date: bool,
     preview: bool,
     query: String,
     width: usize,
@@ -1037,6 +1084,7 @@ pub struct State {
     pub query: String,
     pub mode: &'static str,
     pub search: bool,
+    pub by_date: bool,
     pub preview: bool,
     /// The row the cursor was on, by pane id.
     pub on: String,
@@ -1051,6 +1099,7 @@ impl Default for State {
             query: String::new(),
             mode: "all",
             search: false,
+            by_date: false,
             preview: true,
             on: String::new(),
             client: String::new(),
@@ -1276,6 +1325,12 @@ impl App {
         index::snippets(&index::Query::new(&self.query))
     }
 
+    /// Whether the list on screen is in date order, newest first, rather than
+    /// ranked best match first: the past list with ctrl-s on, and nothing else.
+    fn dated(&self) -> bool {
+        self.by_date && self.mode == Mode::Dead
+    }
+
     /// Re-lay the rows out and re-apply the query, putting the cursor back on the
     /// same SESSION rather than the same index. That is what `--track --id-nth=2`
     /// buys fzf, and owning the state makes it a lookup.
@@ -1310,7 +1365,7 @@ impl App {
                 restarting: self.restarting.keys().cloned().collect(),
             },
         );
-        self.view = filter(&self.all, &self.query, &self.matcher);
+        self.view = filter(&self.all, &self.query, &self.matcher, self.dated());
         self.sel = on
             .and_then(|id| self.view.iter().position(|&i| self.all[i].pane_id == id))
             .unwrap_or(0);
@@ -1332,7 +1387,7 @@ impl App {
         if self.search {
             self.rebuild();
         } else {
-            self.view = filter(&self.all, &self.query, &self.matcher);
+            self.view = filter(&self.all, &self.query, &self.matcher, self.dated());
             self.clamp();
         }
     }
@@ -1475,6 +1530,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
         matcher: SkimMatcherV2::default().ignore_case(),
         mode: Mode::All,
         search: false,
+        by_date: false,
         preview: true,
         query: String::new(),
         width: row_width(term.size()?.width),
@@ -1496,6 +1552,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
     app.query = std::mem::take(&mut app.src.state.query);
     app.mode = Mode::from_key(app.src.state.mode);
     app.search = app.src.state.search;
+    app.by_date = app.src.state.by_date;
     app.preview = app.src.state.preview;
     // Even the FIRST scan runs off the loop. It used to be synchronous, on the
     // reasoning that there is nothing to draw until it lands, and what that
@@ -1549,7 +1606,13 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
         term.draw(|f| {
             let count = format!(" {}/{} ", app.view.len(), app.all.len());
             let mut block = Block::bordered()
-                .title(label(app.mode, live, app.search, app.refreshing()))
+                .title(label(
+                    app.mode,
+                    app.dated(),
+                    live,
+                    app.search,
+                    app.refreshing(),
+                ))
                 .title_bottom(Line::from(count.clone()));
             // Dim, and in the corner furthest from the cursor: it is reference,
             // read once after an update and never again, so it must not compete
@@ -1587,6 +1650,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
                         app.src.ended.is_some(),
                         search_enabled(),
                         app.search,
+                        (app.mode == Mode::Dead).then_some(app.by_date),
                     ),
                     Style::default().fg(Color::DarkGray),
                 ))),
@@ -1839,6 +1903,17 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
                         app.search = !app.search;
                         app.rebuild();
                     }
+                    // The past list by date: newest first, the rows that say what
+                    // was typed ahead of the loose matches (see `filter`). Bound
+                    // on that list alone, the only one with a date to sort by,
+                    // and a rebuild rather than a re-filter so the cursor stays
+                    // on the conversation it was on: a second press then lands
+                    // exactly where the first one started. It arrives as a key
+                    // and not as XOFF, since raw mode turns flow control off.
+                    KeyCode::Char('s') if ctrl && app.mode == Mode::Dead => {
+                        app.by_date = !app.by_date;
+                        app.rebuild();
+                    }
                     // ctrl-/ reaches a terminal as several different bytes, so
                     // all of them are taken rather than one.
                     KeyCode::Char('/') | KeyCode::Char('_') | KeyCode::Char('\u{1f}') if ctrl => {
@@ -1982,6 +2057,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
             query: app.query.clone(),
             mode: app.mode.key(),
             search: app.search,
+            by_date: app.by_date,
             preview: app.preview,
             on: app
                 .selected()
@@ -2019,6 +2095,7 @@ mod tests {
             matcher: SkimMatcherV2::default().ignore_case(),
             mode: Mode::All,
             search: false,
+            by_date: false,
             preview: true,
             query: String::new(),
             width: 100,
@@ -2062,6 +2139,7 @@ mod tests {
             matcher: SkimMatcherV2::default().ignore_case(),
             mode: Mode::All,
             search: false,
+            by_date: false,
             preview: true,
             query: String::new(),
             width: 100,
@@ -2349,7 +2427,7 @@ mod tests {
         a.pending_since = Instant::now() - Duration::from_secs(2);
         assert!(a.refreshing());
         assert_eq!(
-            label(Mode::All, true, false, true),
+            label(Mode::All, false, true, false, true),
             " agent sessions · live · refreshing "
         );
     }
@@ -2426,6 +2504,7 @@ mod tests {
         let d = State::default();
         assert!(d.preview);
         assert!(!d.search);
+        assert!(!d.by_date);
         assert_eq!(Mode::from_key(d.mode), Mode::All);
         assert!(d.query.is_empty() && d.on.is_empty());
     }
@@ -2469,12 +2548,14 @@ mod tests {
         a.query = "banana".into();
         a.mode = Mode::Run;
         a.search = true;
+        a.by_date = true;
         a.preview = false;
         a.query_changed();
         let state = State {
             query: a.query.clone(),
             mode: a.mode.key(),
             search: a.search,
+            by_date: a.by_date,
             preview: a.preview,
             on: a.selected().map(|r| r.pane_id.clone()).unwrap_or_default(),
             // The client the popup was on, which the reopen must target rather
@@ -2487,6 +2568,7 @@ mod tests {
                 query: "banana".into(),
                 mode: "run",
                 search: true,
+                by_date: true,
                 preview: false,
                 on: "%2".into(),
                 client: "/dev/pts/7".into(),
@@ -2699,19 +2781,133 @@ mod tests {
 
     #[test]
     fn the_label_says_which_list_and_what_is_on() {
-        assert_eq!(label(Mode::All, false, false, false), " agent sessions ");
         assert_eq!(
-            label(Mode::Input, true, false, false),
+            label(Mode::All, false, false, false, false),
+            " agent sessions "
+        );
+        assert_eq!(
+            label(Mode::Input, false, true, false, false),
             " waiting for an answer · live "
         );
         assert_eq!(
-            label(Mode::Outdated, false, false, false),
+            label(Mode::Outdated, false, false, false, false),
             " running outdated code "
         );
         assert_eq!(
-            label(Mode::Dead, true, true, false),
+            label(Mode::Dead, false, true, true, false),
             " past sessions · live · ⌕ "
         );
+        // the order goes straight after the name, since it describes that list
+        assert_eq!(
+            label(Mode::Dead, true, true, true, false),
+            " past sessions · by date · live · ⌕ "
+        );
+    }
+
+    /// Past conversations, newest first as the list arrives. Two SAY "tart", the
+    /// older one where a word starts, which the matcher ranks higher; the newest
+    /// of all only has its letters, scattered across four words.
+    const PAST: &str =
+        "dead:claude:/n.jsonl\t30m\t/h/a\tclaude\t1\tdead\t-\ttrial and error then tests\n\
+         dead:claude:/r.jsonl\t1h\t/h/r\tclaude\t1\tdead\t-\trestart the ledger\n\
+         dead:claude:/m.jsonl\t2d\t/h/b\tclaude\t1\tdead\t-\tapple pie\n\
+         dead:claude:/o.jsonl\t9d\t/h/c\tclaude\t1\tdead\t-\tcherry tart";
+
+    fn app_past(query: &str) -> App {
+        let mut a = app(THREE);
+        a.src.ended = Some(Box::new(|| PAST.to_string()));
+        a.mode = Mode::Dead;
+        a.query = query.into();
+        a.fetch();
+        a.rebuild();
+        a
+    }
+
+    /// The reason for the key. A query ranks the past list best match first,
+    /// which scatters what it keeps across the months; by date keeps the same
+    /// matches, newest first, the order the list had before anything was typed.
+    #[test]
+    fn ctrl_s_keeps_the_past_list_newest_first_while_a_query_filters_it() {
+        let mut a = app_past("tart");
+        assert_eq!(
+            ids(&a),
+            [
+                "dead:claude:/o.jsonl",
+                "dead:claude:/r.jsonl",
+                "dead:claude:/n.jsonl"
+            ],
+            "ranked, the word start wins, and the loose match comes last"
+        );
+        a.by_date = true;
+        a.rebuild();
+        assert_eq!(
+            ids(&a),
+            [
+                "dead:claude:/r.jsonl",
+                "dead:claude:/o.jsonl",
+                "dead:claude:/n.jsonl"
+            ],
+            "by date, the two that say it newest first, THEN the loose one"
+        );
+        // …and typing more keeps that order rather than ranking again
+        a.query = "tart e".into();
+        a.query_changed();
+        assert_eq!(
+            ids(&a),
+            [
+                "dead:claude:/r.jsonl",
+                "dead:claude:/o.jsonl",
+                "dead:claude:/n.jsonl"
+            ]
+        );
+    }
+
+    /// Why by date is not simply "leave every match where it stands". The
+    /// letters of a query turn up scattered in rows that have nothing to do with
+    /// it, and the ranking was what kept those under the rows that say it: tried
+    /// on the real history without this, the top of the list was all noise. So
+    /// the loose match stays last even as the newest row there is.
+    #[test]
+    fn by_date_keeps_the_loose_matches_under_the_ones_that_say_it() {
+        let mut a = app_past("tart");
+        a.by_date = true;
+        a.rebuild();
+        assert_eq!(
+            ids(&a).last().map(String::as_str),
+            Some("dead:claude:/n.jsonl")
+        );
+        // With nothing but loose matches, they are simply newest first.
+        a.query = "tlr".into();
+        a.query_changed();
+        assert_eq!(ids(&a), ["dead:claude:/n.jsonl", "dead:claude:/r.jsonl"]);
+    }
+
+    /// The cursor stays on the conversation it was on, so a second press lands
+    /// exactly where the first one started.
+    #[test]
+    fn sorting_by_date_keeps_the_cursor_on_the_same_conversation() {
+        let mut a = app_past("tart");
+        assert_eq!(on(&a), "dead:claude:/o.jsonl");
+        a.by_date = true;
+        a.rebuild();
+        assert_eq!(on(&a), "dead:claude:/o.jsonl");
+        assert_eq!(a.sel, 1, "which is now below the newer one");
+        a.by_date = false;
+        a.rebuild();
+        assert_eq!((on(&a), a.sel), ("dead:claude:/o.jsonl", 0));
+    }
+
+    /// Only the past list has a date to go by. Left on through a Tab, the flag
+    /// must not quietly stop the live lists ranking what a query keeps.
+    #[test]
+    fn by_date_is_the_past_lists_alone() {
+        let mut a = app("%1\ta:1.1\t/h\tclaude\t1\tidle\t-\trestart the ledger\n\
+                         %2\tb:1.1\t/h\tclaude\t1\tidle\t-\tcherry tart");
+        a.by_date = true;
+        a.query = "tart".into();
+        a.rebuild();
+        assert!(!a.dated(), "a live list is never in date order");
+        assert_eq!(ids(&a), ["%2", "%1"], "so a query still ranks it");
     }
 
     /// The list ctrl-x and F8 act on, gathered in one place. It crosses the four
@@ -2767,14 +2963,19 @@ mod tests {
     /// nothing is worse than a shorter header.
     #[test]
     fn the_header_advertises_only_bound_keys() {
-        let bare = header(false, false, false, false);
+        let bare = header(false, false, false, false, None);
         assert!(!bare.contains("ctrl-x"));
         assert!(!bare.contains("resume"));
         assert!(!bare.contains("ctrl-t"));
-        assert!(header(true, false, false, false).contains("ctrl-x"));
-        assert!(header(false, true, false, false).contains("enter: switch/resume"));
-        assert!(header(false, false, true, true).contains("(on)"));
-        assert!(!header(false, false, true, false).contains("(on)"));
+        assert!(!bare.contains("ctrl-s"));
+        assert!(header(true, false, false, false, None).contains("ctrl-x"));
+        assert!(header(false, true, false, false, None).contains("enter: switch/resume"));
+        assert!(header(false, false, true, true, None).contains("(on)"));
+        assert!(!header(false, false, true, false, None).contains("(on)"));
+        // ctrl-s is bound on the past list, and only said there
+        let past = header(false, true, false, false, Some(false));
+        assert!(past.contains("ctrl-s: sort by date") && !past.contains("(on)"));
+        assert!(header(false, true, false, false, Some(true)).contains("ctrl-s: sort by date (on)"));
     }
 
     #[test]
@@ -2791,12 +2992,12 @@ mod tests {
     fn the_query_filters_and_ranks() {
         let mut a = app(THREE);
         a.query = "banana".into();
-        a.view = filter(&a.all, &a.query, &a.matcher);
+        a.view = filter(&a.all, &a.query, &a.matcher, false);
         assert_eq!(a.view.len(), 1);
 
         // an AND of terms, as fzf's extended search does, not one fuzzy match
         a.query = "apple tart".into();
-        a.view = filter(&a.all, &a.query, &a.matcher);
+        a.view = filter(&a.all, &a.query, &a.matcher, false);
         assert!(a.view.is_empty());
     }
 
@@ -2889,7 +3090,7 @@ mod tests {
     fn an_empty_view_is_safe_to_navigate() {
         let mut a = app(THREE);
         a.query = "zzzzz".into();
-        a.view = filter(&a.all, &a.query, &a.matcher);
+        a.view = filter(&a.all, &a.query, &a.matcher, false);
         assert!(a.view.is_empty());
         a.move_by(1);
         a.move_by(-1);

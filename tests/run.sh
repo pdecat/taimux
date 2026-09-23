@@ -1209,6 +1209,88 @@ FEED
 fi
 
 # ============================================================================
+section "the past list by date: ctrl-s keeps a query's matches newest first"
+# ============================================================================
+# A query ranks what it keeps best match first, which on the past list scatters
+# the matches across the months; ctrl-s keeps them in the order the list arrives
+# in, newest first, with the rows that only match loosely still at the bottom.
+# Driven in a real terminal for the reason the section above gives, that an
+# unbound key fails silently, and for one of its own: ctrl-s is also XOFF, so
+# this is what proves it reaches the picker as a key at all.
+PSOCK="taimux-pasttest-$$"
+ptmux() { tmux -f /dev/null -L "$PSOCK" "$@"; }
+if [ ! -x "$KBIN" ]; then
+  skip "the past list by date (no taimux built; run just build)"
+elif ! command -v tmux >/dev/null 2>&1; then
+  skip "the past list by date (no tmux here to drive it in)"
+else
+  PT="$TMP/past"; mkdir -p "$PT/run/taimux"
+  # Nothing running, so the only rows anywhere are the past ones.
+  printf '#!/usr/bin/env bash\n[ "${1:-}" = _panes ] && exit 0\nexit 1\n' > "$PT/none"
+  chmod +x "$PT/none"
+  # Newest first, as the indexer writes it. Two of them SAY "tart", the older
+  # where a word starts, which the matcher ranks higher; the newest of all only
+  # has its letters, scattered across four words.
+  pnow=$(date +%s)
+  {
+    printf 'sess %s 2\n' "$pnow"
+    printf '%s\t-\tclaude\t/p/new.jsonl\t/tmp\t2.1.229\ttrial and error then tests\tt\n' "$((pnow - 1800))"
+    printf '%s\t-\tclaude\t/p/led.jsonl\t/tmp\t2.1.229\trestart the ledger\tt\n' "$((pnow - 3600))"
+    printf '%s\t-\tclaude\t/p/mid.jsonl\t/tmp\t2.1.229\tapple pie\tt\n' "$((pnow - 2 * 86400))"
+    printf '%s\t-\tclaude\t/p/old.jsonl\t/tmp\t2.1.229\tcherry tart\tt\n' "$((pnow - 9 * 86400))"
+  } > "$PT/run/taimux/sessions"
+
+  pscreen() { ptmux capture-pane -p 2>/dev/null; }
+  # The rows in the order the list shows them, one word each. The list is
+  # screen rows 4 to 11 of a 24-line window, and the preview under it names no
+  # title.
+  porder() {
+    pscreen | sed -n '4,11p' |
+      grep -o 'trial and error\|restart the ledger\|apple pie\|cherry tart' |
+      awk '{ print $1 }' | paste -sd, -
+  }
+  pwait() {   # $1 = the order wanted -> 0 once it is on screen
+    local n=0
+    while [ "$n" -lt 60 ]; do
+      [ "$(porder)" = "$1" ] && return 0
+      n=$((n+1)); sleep 0.05
+    done
+    return 1
+  }
+  pexpect() { if pwait "$2"; then ok "$1"; else no "$1" "expected [$2] got [$(porder)]"; fi; }
+
+  ptmux new-session -d -x 120 -y 24 \
+    "TAIMUX_SELF=$PT/none TAIMUX_SEARCH=0 TAIMUX_SESSIONS=1 TAIMUX_REMOTE=0 \
+     XDG_RUNTIME_DIR=$PT/run $KBIN tui >$PT/chosen 2>$PT/err" 2>/dev/null
+  # Let the first scan land before leaving the live list: landing after, it
+  # would stand in for the past rows until the next tick.
+  n=0; while [ "$n" -lt 60 ] && ! pscreen | grep -q 'No agent sessions'; do n=$((n+1)); sleep 0.05; done
+  ptmux send-keys BTab 2>/dev/null
+  pexpect "the past list opens newest first"   "trial,restart,apple,cherry"
+  has   "…and offers ctrl-s there"          "$(pscreen | sed -n '3p')" "ctrl-s: sort by date"
+  ptmux send-keys 'tart' 2>/dev/null
+  pexpect "a query ranks the word start first" "cherry,restart,trial"
+  ptmux send-keys C-s 2>/dev/null
+  pexpect "ctrl-s puts the rows that say it newest first, the loose one last" \
+          "restart,cherry,trial"
+  has   "…the border says so"               "$(pscreen | sed -n '1p')" "by date"
+  has   "…and so does the header"           "$(pscreen | sed -n '3p')" "sort by date (on)"
+  has   "…with the cursor still on its conversation" "$(pscreen | grep '▶')" "cherry tart"
+  ptmux send-keys C-s 2>/dev/null
+  pexpect "a second press ranks them again"    "cherry,restart,trial"
+  hasnt "…and the border stops saying so"   "$(pscreen | sed -n '1p')" "by date"
+  # On to a live list, which has no date to sort by.
+  ptmux send-keys Tab 2>/dev/null
+  n=0; while [ "$n" -lt 60 ] && pscreen | sed -n '1p' | grep -q 'past sessions'; do n=$((n+1)); sleep 0.05; done
+  hasnt "a live list does not offer ctrl-s" "$(pscreen | sed -n '3p')" "ctrl-s"
+  ptmux send-keys Escape 2>/dev/null
+  n=0; while [ "$n" -lt 60 ] && ptmux has-session 2>/dev/null; do n=$((n+1)); sleep 0.05; done
+  eq "…and it chose nothing"                "" "$(cat "$PT/chosen" 2>/dev/null)"
+  eq "…and said nothing on stderr"          "" "$(cat "$PT/err" 2>/dev/null)"
+  ptmux kill-server 2>/dev/null
+fi
+
+# ============================================================================
 section "F1 from a pane with no agent: where the cursor opens"
 # ============================================================================
 # The picker tests above drive `tui`, which is handed a row source and nothing

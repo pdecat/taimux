@@ -550,6 +550,7 @@ Inside the picker:
 |----------------|---------------------------------|
 | type           | filter on what each row shows |
 | `Ctrl-t`       | …and on [what was said inside each session](#searching-what-a-session-said) |
+| `Ctrl-s`       | in the [past](#past-sessions) list, keep what the query matches [newest first](#newest-first-or-best-match-first) rather than best match first |
 | `↑` / `↓`      | move (wraps around at the ends) |
 | `Ctrl-j` / `Ctrl-k` | same, and `Ctrl-n` / `Ctrl-p` too |
 | `PgUp` / `PgDn`| move a screenful (stops at the ends, it does not wrap) |
@@ -954,6 +955,30 @@ with your own prompt among them. And
 [transcript search](#searching-what-a-session-said) covers these too, which is
 half the reason to have them: what you remember about last Tuesday is what was
 said, not where it ran.
+
+### Newest first, or best match first
+
+The list opens **newest first**. Typing ranks what it keeps **best match
+first**, the way every other list does, and on this one that scatters the
+matches across the months: search for a word from last week and the
+conversation you want can sit under older ones that happen to match it more
+tightly.
+
+**`Ctrl-s`** keeps the matches in date order instead, and the border says
+`by date` while it is on. It is bound on this list alone, the only one with a
+date to sort by, and it stays on through `Tab`, like `Ctrl-t`. The cursor stays
+on the conversation it was on, so a second press puts you back exactly where the
+first one started.
+
+It is **not** "leave every match where it stands", which is what fzf's
+`--no-sort` does and what was tried first. The ranking was doing a second job
+nobody had noticed: the row matcher is fuzzy, so the letters of `ha-bert`, in
+order but scattered, are in a dozen rows that have nothing to do with it, and
+ranking is what kept those under the rows that actually say it. Against the real
+history, with that gone, the top of the list was all noise. So by date puts the
+rows that hold **every word as you typed it** first, newest first, and the loose
+matches after them, newest first too. The same rows either way; only their
+order changes.
 
 ### Five agents, three shapes
 
