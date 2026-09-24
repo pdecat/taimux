@@ -1394,6 +1394,78 @@ IFEED
 fi
 
 # ============================================================================
+section "the past list searches what was said, from the start"
+# ============================================================================
+# rses always searched what a conversation said. taimux's past list only did
+# once Ctrl-t was pressed, so a URL pasted into it matched no row and the list
+# said "Nothing matches" about a session rses found at once. It searches content
+# from the start now; the live lists still filter on their rows, and a list not
+# searching content says Ctrl-t would.
+QSOCK="taimux-pastsearch-$$"
+qtmux() { tmux -f /dev/null -L "$QSOCK" "$@"; }
+if [ ! -x "$KBIN" ]; then
+  skip "the past list's content search (no taimux built; run just build)"
+elif ! command -v tmux >/dev/null 2>&1; then
+  skip "the past list's content search (no tmux here to drive it in)"
+else
+  QT="$TMP/pastsearch"; mkdir -p "$QT/run/taimux/index"
+  cat > "$QT/feed" <<'QFEED'
+#!/usr/bin/env bash
+[ "${1:-}" = _panes ] || exit 1
+printf '%%01\twork:1.1\t/tmp/p1\tclaude\t2.1.229\tidle\t-\trow-01\n'
+QFEED
+  chmod +x "$QT/feed"
+  qnow=$(date +%s)
+  {
+    printf 'sess %s 2\n' "$qnow"
+    printf '%s\t-\tclaude\t/p/new.jsonl\t/tmp\t2.1.229\tapple pie\tt\n' "$((qnow - 3600))"
+    printf '%s\t-\tclaude\t/p/old.jsonl\t/tmp\t2.1.229\tcherry tart\tt\n' "$((qnow - 86400))"
+  } > "$QT/run/taimux/sessions"
+  # What the older one said, as the indexer files it: the URL is in there and
+  # on neither row. The file name is the row id with everything awkward folded.
+  QURL='https://git.example.test/group/project/-/merge_requests/273'
+  printf 'idx 1 %s dead:claude:/p/old.jsonl /p/old.jsonl\nwe went through %s together\n' \
+    "$qnow" "$QURL" > "$QT/run/taimux/index/dead_claude__p_old_jsonl"
+
+  qscreen() { qtmux capture-pane -p 2>/dev/null; }
+  qwait() {   # $1 = text wanted on screen
+    local n=0
+    while [ "$n" -lt 60 ]; do
+      qscreen | grep -qF -- "$1" && return 0
+      n=$((n+1)); sleep 0.05
+    done
+    return 1
+  }
+  qexpect() { if qwait "$2"; then ok "$1"; else no "$1" "no [$2] on screen: $(qscreen | sed -n '1,6p' | tr '\n' '|')"; fi; }
+
+  qtmux new-session -d -x 150 -y 24 \
+    "TAIMUX_SELF=$QT/feed TAIMUX_SEARCH=1 TAIMUX_SESSIONS=1 TAIMUX_REMOTE=0 \
+     XDG_RUNTIME_DIR=$QT/run $KBIN tui >$QT/chosen 2>$QT/err" 2>/dev/null
+  qexpect "the live list comes up" "row-01"
+  hasnt "…filtering on its rows, not on what was said" "$(qscreen | sed -n '1p')" "⌕"
+  qtmux send-keys -l "$QURL" 2>/dev/null
+  qexpect "a URL no live row shows matches nothing there" "Nothing matches"
+  qexpect "…and the note names the key that would search further" \
+          "ctrl-t searches what was said in them too"
+  qtmux send-keys C-u 2>/dev/null
+  qtmux send-keys BTab 2>/dev/null
+  n=0; while [ "$n" -lt 60 ] && ! qscreen | sed -n '1p' | grep -q "past sessions"; do n=$((n+1)); sleep 0.05; done
+  has   "the past list searches what was said from the start" "$(qscreen | sed -n '1p')" "⌕"
+  qtmux send-keys -l "$QURL" 2>/dev/null
+  qexpect "…so the same URL finds the conversation it was said in" "cherry tart"
+  hasnt "…and only that one"                  "$(qscreen | sed -n '4,11p')" "apple pie"
+  has   "…saying why it is there"             "$(qscreen | sed -n '4,11p')" "⌕"
+  qtmux send-keys C-t 2>/dev/null
+  qexpect "ctrl-t turns it off for the past list" "Nothing matches"
+  hasnt "…and the border stops claiming a search" "$(qscreen | sed -n '1p')" "⌕"
+  qtmux send-keys Escape 2>/dev/null
+  n=0; while [ "$n" -lt 60 ] && qtmux has-session 2>/dev/null; do n=$((n+1)); sleep 0.05; done
+  eq "…and it chose nothing"                  "" "$(cat "$QT/chosen" 2>/dev/null)"
+  eq "…and said nothing on stderr"            "" "$(cat "$QT/err" 2>/dev/null)"
+  qtmux kill-server 2>/dev/null
+fi
+
+# ============================================================================
 section "F1 from a pane with no agent: where the cursor opens"
 # ============================================================================
 # The picker tests above drive `tui`, which is handed a row source and nothing

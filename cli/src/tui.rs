@@ -646,12 +646,18 @@ fn room_for_tag(width: u16, count: &str) -> bool {
 /// all, nothing in the state you are filtering on, nothing matching what you
 /// typed, and no ended sessions recorded yet. Saying which is the whole point,
 /// since the picker used to say nothing and simply close.
+///
+/// `search_hint` is whether ctrl-t would search what was said and is not doing
+/// so here, which is when a query that matches no row may still be in a
+/// transcript. A URL pasted into the past list with its search off found nothing
+/// and said nothing about why, which is exactly the moment to name the key.
 fn empty_note(
     mode: Mode,
     query: &str,
     scanning: bool,
     nothing_scanned: bool,
     ended: bool,
+    search_hint: bool,
 ) -> Vec<Line<'static>> {
     let mut lines: Vec<String> = Vec::new();
     if scanning {
@@ -668,6 +674,9 @@ fn empty_note(
     }
     if !query.is_empty() {
         lines.push(format!("Nothing matches {}", query));
+        if search_hint {
+            lines.push("ctrl-t searches what was said in them too.".into());
+        }
         lines.push("ctrl-u clears it.".into());
     } else if mode == Mode::Dead {
         lines.push("No past conversations have been found here yet.".into());
@@ -739,11 +748,20 @@ struct App {
     src: Source,
     matcher: SkimMatcherV2,
     mode: Mode,
-    /// Typing searches what sessions SAID, not only what their rows show. Off by
-    /// default, as in bash. The reason it HAD to be off is gone (a paste can no
-    /// longer be read as Enter, see the module comment), but the port does not
-    /// change behaviour; the rest of it lands in step 5.
+    /// Typing searches what sessions SAID, not only what their rows show, in the
+    /// lists of live sessions. Off by default, as in bash. The reason it HAD to
+    /// be off is gone (a paste can no longer be read as Enter, see the module
+    /// comment), and what keeps it off is what those lists are for: jumping to a
+    /// session already on screen, where the row is what you know and a hit from
+    /// inside some other transcript is only another row to read past.
     search: bool,
+    /// The same, for the past list, where it is ON by default. That list is
+    /// history, and what you remember about a conversation from last week is
+    /// what was said in it, a link or an error string, far more often than its
+    /// title. Off there, a pasted URL matched nothing while rses, which always
+    /// searches content, found the very sessions it came from. Each list keeps
+    /// its own, so ctrl-t on one leaves the other as it was.
+    search_past: bool,
     /// Order the idle and past lists by when each session last said something,
     /// newest first, rather than in their own order or ranked best match first
     /// (loose matches still go last, see `filter`). Only those two lists read
@@ -849,7 +867,7 @@ impl App {
         // were after before jumping to it.
         let mut out: Vec<Line<'static>> = Vec::new();
         let mut body: Vec<Line<'static>> = Vec::new();
-        if self.search && self.query.chars().count() >= search_min() {
+        if self.searching() && self.query.chars().count() >= search_min() {
             let hits = index::preview_match(
                 &id,
                 &index::Query::new(&self.query),
@@ -1117,6 +1135,9 @@ pub struct State {
     pub query: String,
     pub mode: &'static str,
     pub search: bool,
+    /// Whether the past list searches what was said, which it does unless
+    /// ctrl-t turned that off there.
+    pub search_past: bool,
     pub by_date: bool,
     pub preview: bool,
     /// The row the cursor was on, by pane id.
@@ -1132,6 +1153,7 @@ impl Default for State {
             query: String::new(),
             mode: "all",
             search: false,
+            search_past: true,
             by_date: false,
             preview: true,
             on: String::new(),
@@ -1359,10 +1381,31 @@ impl App {
     /// every transcript and a match would say nothing. Handing the layout a
     /// snippet map for a one-letter query turns every row into a search hit.
     fn snippets(&self) -> HashMap<String, String> {
-        if !self.search || self.query.chars().count() < search_min() {
+        if !self.searching() || self.query.chars().count() < search_min() {
             return HashMap::new();
         }
         index::snippets(&index::Query::new(&self.query))
+    }
+
+    /// Whether typing searches what was said, for the list on screen: the past
+    /// list has its own switch, on by default, and every other list shares one.
+    fn searching(&self) -> bool {
+        if self.mode == Mode::Dead {
+            self.search_past
+        } else {
+            self.search
+        }
+    }
+
+    /// ctrl-t: the list on screen's own switch. The past list and the live ones
+    /// default differently, so turning one off must not turn the other on.
+    fn toggle_search(&mut self) {
+        if self.mode == Mode::Dead {
+            self.search_past = !self.search_past;
+        } else {
+            self.search = !self.search;
+        }
+        self.rebuild();
     }
 
     /// Whether the list on screen is in date order, newest first, rather than in
@@ -1425,7 +1468,7 @@ impl App {
     /// With search off it is only a filter, which is what makes typing into a
     /// picker you merely opened to jump as cheap as it always was.
     fn query_changed(&mut self) {
-        if self.search {
+        if self.searching() {
             self.rebuild();
         } else {
             self.view = filter(&self.all, &self.query, &self.matcher, self.dated());
@@ -1584,6 +1627,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
         matcher: SkimMatcherV2::default().ignore_case(),
         mode: Mode::All,
         search: false,
+        search_past: false,
         by_date: false,
         preview: true,
         query: String::new(),
@@ -1607,6 +1651,10 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
     app.query = std::mem::take(&mut app.src.state.query);
     app.mode = Mode::from_key(app.src.state.mode);
     app.search = app.src.state.search;
+    // Only where there is a search to switch on. TAIMUX_SEARCH=0 takes ctrl-t and
+    // the index away together, and the border must not then claim a ⌕ that has
+    // nothing behind it.
+    app.search_past = app.src.state.search_past && search_enabled();
     app.by_date = app.src.state.by_date;
     app.preview = app.src.state.preview;
     // Even the FIRST scan runs off the loop. It used to be synchronous, on the
@@ -1665,7 +1713,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
                     app.mode,
                     app.dated(),
                     live,
-                    app.search,
+                    app.searching(),
                     app.refreshing(),
                 ))
                 .title_bottom(Line::from(count.clone()));
@@ -1704,7 +1752,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
                         app.src.script.is_some(),
                         app.src.ended.is_some(),
                         search_enabled(),
-                        app.search,
+                        app.searching(),
                         app.mode.has_dates().then_some(app.by_date),
                     ),
                     Style::default().fg(Color::DarkGray),
@@ -1753,6 +1801,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
                         // with nothing running on it at all.
                         app.tsv.trim().is_empty(),
                         app.src.ended.is_some(),
+                        search_enabled() && !app.searching(),
                     ))
                     .style(Style::default().fg(Color::DarkGray))
                     .wrap(Wrap { trim: false }),
@@ -1950,10 +1999,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
                     KeyCode::Char('r') if ctrl => app.start_refresh(),
                     // Nothing is bound when search is turned off, and the
                     // picker then behaves exactly as it did before there was any.
-                    KeyCode::Char('t') if ctrl && search_enabled() => {
-                        app.search = !app.search;
-                        app.rebuild();
-                    }
+                    KeyCode::Char('t') if ctrl && search_enabled() => app.toggle_search(),
                     // By date: newest first by when each session last said
                     // something, the rows that say what was typed ahead of the
                     // loose matches (see `filter`). Bound only on the lists with
@@ -2109,6 +2155,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
             query: app.query.clone(),
             mode: app.mode.key(),
             search: app.search,
+            search_past: app.search_past,
             by_date: app.by_date,
             preview: app.preview,
             on: app
@@ -2147,6 +2194,7 @@ mod tests {
             matcher: SkimMatcherV2::default().ignore_case(),
             mode: Mode::All,
             search: false,
+            search_past: false,
             by_date: false,
             preview: true,
             query: String::new(),
@@ -2192,6 +2240,7 @@ mod tests {
             matcher: SkimMatcherV2::default().ignore_case(),
             mode: Mode::All,
             search: false,
+            search_past: false,
             by_date: false,
             preview: true,
             query: String::new(),
@@ -2506,15 +2555,15 @@ mod tests {
         };
 
         // nothing running at all, which is the reported case
-        let none = text(empty_note(Mode::All, "", false, true, false));
+        let none = text(empty_note(Mode::All, "", false, true, false, false));
         assert!(none.contains("No agent sessions on this machine"), "{none}");
         assert!(none.contains("Esc closes this"), "{none}");
         // …and with an ended list to offer, it offers it
-        let none_ended = text(empty_note(Mode::All, "", false, true, true));
+        let none_ended = text(empty_note(Mode::All, "", false, true, true, false));
         assert!(none_ended.contains("Tab reaches the conversations that ended"));
 
         // something IS running, just not in this state
-        let filtered = text(empty_note(Mode::Input, "", false, false, true));
+        let filtered = text(empty_note(Mode::Input, "", false, false, true, false));
         assert!(
             filtered.contains("Nothing is waiting for an answer right now"),
             "{filtered}"
@@ -2522,12 +2571,27 @@ mod tests {
         assert!(!filtered.contains("No agent sessions"), "{filtered}");
 
         // a query nobody matches, which says what to press to undo it
-        let q = text(empty_note(Mode::All, "zzz", false, false, true));
+        let q = text(empty_note(Mode::All, "zzz", false, false, true, false));
         assert!(q.contains("Nothing matches zzz"), "{q}");
         assert!(q.contains("ctrl-u"), "{q}");
+        assert!(!q.contains("ctrl-t"), "no search to offer: {q}");
+        // …and names ctrl-t when what was said is not being searched but could
+        // be, which is where a pasted URL used to find nothing and say nothing
+        let hint = text(empty_note(
+            Mode::Dead,
+            "https://x/273",
+            false,
+            false,
+            true,
+            true,
+        ));
+        assert!(
+            hint.contains("ctrl-t searches what was said in them too"),
+            "{hint}"
+        );
 
         // the ended list, before anything has ended
-        let dead = text(empty_note(Mode::Dead, "", false, false, true));
+        let dead = text(empty_note(Mode::Dead, "", false, false, true, false));
         assert!(
             dead.contains("No past conversations have been found here yet"),
             "{dead}"
@@ -2536,13 +2600,13 @@ mod tests {
         // …and before the first scan has come back at all, which is the state a
         // popup used to show as an empty box. It outranks every other case,
         // because none of them is known yet.
-        let scanning = text(empty_note(Mode::All, "", true, true, true));
+        let scanning = text(empty_note(Mode::All, "", true, true, true, false));
         assert!(
             scanning.contains("Looking for agent sessions"),
             "{scanning}"
         );
         assert!(!scanning.contains("No agent sessions"), "{scanning}");
-        let scanning_q = text(empty_note(Mode::Input, "zzz", true, false, true));
+        let scanning_q = text(empty_note(Mode::Input, "zzz", true, false, true, false));
         assert!(
             scanning_q.contains("Looking for agent sessions"),
             "{scanning_q}"
@@ -2558,6 +2622,8 @@ mod tests {
         let d = State::default();
         assert!(d.preview);
         assert!(!d.search);
+        // the past list searches what was said from the start; the others not
+        assert!(d.search_past);
         assert!(!d.by_date);
         assert_eq!(Mode::from_key(d.mode), Mode::All);
         assert!(d.query.is_empty() && d.on.is_empty());
@@ -2609,6 +2675,7 @@ mod tests {
             query: a.query.clone(),
             mode: a.mode.key(),
             search: a.search,
+            search_past: a.search_past,
             by_date: a.by_date,
             preview: a.preview,
             on: a.selected().map(|r| r.pane_id.clone()).unwrap_or_default(),
@@ -2622,6 +2689,7 @@ mod tests {
                 query: "banana".into(),
                 mode: "run",
                 search: true,
+                search_past: false,
                 by_date: true,
                 preview: false,
                 on: "%2".into(),
@@ -3033,6 +3101,28 @@ mod tests {
         a.step_mode(false); // tab from the last stop is back to all
         assert_eq!(a.mode, Mode::All);
         assert_eq!(ids(&a), ["%1", "%2", "%3"]);
+    }
+
+    /// The past list searches what was said from an ordinary open, the live lists
+    /// filter on their rows, and ctrl-t flips the list on screen alone. With one
+    /// shared switch, turning the past list's off would have turned the live
+    /// lists' on, and the reverse.
+    #[test]
+    fn the_past_list_searches_what_was_said_and_the_live_ones_do_not() {
+        let mut a = app(THREE);
+        a.search_past = true; // what an ordinary open starts with, search allowed
+        assert!(!a.searching(), "a live list filters on what its rows show");
+        a.src.ended = Some(Box::new(|| PAST.to_string()));
+        a.step_mode(true); // shift-tab from the first stop is the past list
+        assert!(a.searching(), "the past list searches what was said");
+        a.toggle_search();
+        assert!(!a.searching(), "ctrl-t turns it off there");
+        a.step_mode(false); // back to all sessions
+        assert!(!a.searching(), "…leaving the live lists as they were");
+        a.toggle_search();
+        assert!(a.searching(), "ctrl-t on a live list");
+        a.step_mode(true);
+        assert!(!a.searching(), "…leaves the past list off, as it was left");
     }
 
     /// ctrl-x on a past row restarts nothing, so it holds nothing either. Held,

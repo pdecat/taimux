@@ -561,7 +561,7 @@ Inside the picker:
 | key            | action                          |
 |----------------|---------------------------------|
 | type           | filter on what each row shows |
-| `Ctrl-t`       | …and on [what was said inside each session](#searching-what-a-session-said) |
+| `Ctrl-t`       | …and on [what was said inside each session](#searching-what-a-session-said) (the [past](#past-sessions) list does from the start) |
 | `Ctrl-s`       | in the [idle](#what-a-session-is-doing) and [past](#newest-first-or-best-match-first) lists, order by when each session last said something, newest first |
 | `↑` / `↓`      | move (wraps around at the ends) |
 | `Ctrl-j` / `Ctrl-k` | same, and `Ctrl-n` / `Ctrl-p` too |
@@ -804,8 +804,24 @@ nowhere says why it did, and the preview shows the first few places the word tur
 up, with the term picked out. Nothing to configure and nothing on disk: the index
 lives in `$XDG_RUNTIME_DIR` and dies with the boot.
 
-**It is off until you press `Ctrl-t`, and that default was once a safety
-feature.** fzf
+**In the [past list](#past-sessions) it is on from the start; in the lists of
+live sessions it is off until you press `Ctrl-t`.** `Ctrl-t` switches the list on
+screen only, so turning it off in one never turns it on in the other, and the
+border shows `⌕` wherever it is on. Where it is off and a query matches no row,
+the list says `Ctrl-t` would search further.
+
+The past list searches by default because that list is history, and what you
+remember about a conversation from last week is what was said in it, a link or
+an error string, far more often than its title. With it off, a merge request URL
+pasted there matched no row and the list answered "Nothing matches", while rses,
+which always searched content, found the very sessions it came from (taimux
+finds four, since its index also keeps the URLs a session fetched). Searching
+every indexed conversation costs 42 to 57 ms per keystroke here, 794 of them in
+24 MB. The live lists stay off because they are for jumping to a session already
+on screen: the row is what you know there, and a hit from inside some other
+transcript is only another row to read past.
+
+The live lists' default was once a safety feature, too. fzf
 reads a pasted line break as Enter, and the only thing stopping the picker
 accepting on a paste is that [a pasted line matches no session](#notes). Searching
 transcripts hands it something to match: measured over a few hundred real
@@ -818,9 +834,8 @@ came back the day search shipped, with a host going down behind it. Off by
 default, typing matches rows exactly as it always did.
 
 That reason is gone: the picker reads a paste as a paste (see
-[the picker](#the-picker)). `Ctrl-t` still starts off, for the plainer reason
-that searching every transcript on every keystroke is work to ask for rather
-than to pay for by default.
+[the picker](#the-picker)), which is also what made it safe to turn search on
+for the past list.
 
 Three things about how it matches, each of which had to be that way:
 
@@ -963,10 +978,10 @@ How long ago it stopped goes where a pane label would, because that column is th
 one thing a past session cannot have and the one thing you sort them by in your
 head. **Enter** opens the conversation again, **in its own tool**, in the
 directory it ran in. The **preview** shows how it left off, the last few turns
-with your own prompt among them. And
-[transcript search](#searching-what-a-session-said) covers these too, which is
-half the reason to have them: what you remember about last Tuesday is what was
-said, not where it ran.
+with your own prompt among them. And typing here searches
+[what was said](#searching-what-a-session-said) from the start, no `Ctrl-t`
+needed, which is half the reason to have them: what you remember about last
+Tuesday is what was said, not where it ran.
 
 ### Newest first, or best match first
 
