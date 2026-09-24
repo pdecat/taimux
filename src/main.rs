@@ -558,9 +558,9 @@ fn restored_state() -> taimux_cli::tui::State {
         // Leaked into a &'static str, which is what Mode::key hands back and
         // what makes the struct free to build in the picker. One per process.
         mode: Box::leak(get("TAIMUX_STATE_MODE").into_boxed_str()),
-        search: get("TAIMUX_STATE_SEARCH") == "1",
-        // Absent means an ordinary open, where the past list searches what was
-        // said; only a reopen of one that had it off says `0`.
+        // Absent means an ordinary open, where every list searches what was
+        // said; only a reopen of a picker that had one of them off says `0`.
+        search: taimux_core::env::var("TAIMUX_STATE_SEARCH").is_none_or(|v| v == "1"),
         search_past: taimux_core::env::var("TAIMUX_STATE_SEARCH_PAST").is_none_or(|v| v == "1"),
         by_date: get("TAIMUX_STATE_BY_DATE") == "1",
         // Absent means an ordinary open, where the preview is on.
@@ -1394,10 +1394,12 @@ fn main() {
         // wants a test that crosses it.
         "snips" => {
             let q = std::env::args().skip(2).collect::<Vec<_>>().join(" ");
-            let mut out: Vec<(String, String)> =
-                taimux_core::index::snippets(&taimux_core::index::Query::new(&q))
-                    .into_iter()
-                    .collect();
+            let mut out: Vec<(String, String)> = taimux_core::index::snippets(
+                &taimux_core::index::Query::new(&q),
+                taimux_core::index::Scope::All,
+            )
+            .into_iter()
+            .collect();
             out.sort(); // a directory read is in no particular order
             for (pane, snip) in out {
                 println!("{}\t{}", pane, snip);

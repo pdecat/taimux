@@ -749,18 +749,17 @@ struct App {
     matcher: SkimMatcherV2,
     mode: Mode,
     /// Typing searches what sessions SAID, not only what their rows show, in the
-    /// lists of live sessions. Off by default, as in bash. The reason it HAD to
-    /// be off is gone (a paste can no longer be read as Enter, see the module
-    /// comment), and what keeps it off is what those lists are for: jumping to a
-    /// session already on screen, where the row is what you know and a hit from
-    /// inside some other transcript is only another row to read past.
+    /// lists of live sessions. On by default since 2026-09-24, Patrick's call,
+    /// after it was off for as long as the bash picker existed. The reason it
+    /// HAD to be off (a paste read as Enter) went with fzf, see the module
+    /// comment, and what was left was a default that made the one search people
+    /// reach for, a link or an error string, find nothing until ctrl-t.
     search: bool,
-    /// The same, for the past list, where it is ON by default. That list is
-    /// history, and what you remember about a conversation from last week is
-    /// what was said in it, a link or an error string, far more often than its
-    /// title. Off there, a pasted URL matched nothing while rses, which always
-    /// searches content, found the very sessions it came from. Each list keeps
-    /// its own, so ctrl-t on one leaves the other as it was.
+    /// The same, for the past list, which is where it went on first: a pasted
+    /// URL matched nothing there while rses, which always searched content,
+    /// found the very sessions it came from. Each list keeps its own switch, so
+    /// ctrl-t to jump by name among the live sessions leaves the history
+    /// searching what was said.
     search_past: bool,
     /// Order the idle and past lists by when each session last said something,
     /// newest first, rather than in their own order or ranked best match first
@@ -1152,7 +1151,7 @@ impl Default for State {
         State {
             query: String::new(),
             mode: "all",
-            search: false,
+            search: true,
             search_past: true,
             by_date: false,
             preview: true,
@@ -1384,7 +1383,13 @@ impl App {
         if !self.searching() || self.query.chars().count() < search_min() {
             return HashMap::new();
         }
-        index::snippets(&index::Query::new(&self.query))
+        // Only the conversations this list can show: see `index::Scope`.
+        let scope = if self.mode == Mode::Dead {
+            index::Scope::Past
+        } else {
+            index::Scope::Live
+        };
+        index::snippets(&index::Query::new(&self.query), scope)
     }
 
     /// Whether typing searches what was said, for the list on screen: the past
@@ -1650,10 +1655,10 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
     // Default-empty otherwise, which is an ordinary open.
     app.query = std::mem::take(&mut app.src.state.query);
     app.mode = Mode::from_key(app.src.state.mode);
-    app.search = app.src.state.search;
     // Only where there is a search to switch on. TAIMUX_SEARCH=0 takes ctrl-t and
     // the index away together, and the border must not then claim a ⌕ that has
     // nothing behind it.
+    app.search = app.src.state.search && search_enabled();
     app.search_past = app.src.state.search_past && search_enabled();
     app.by_date = app.src.state.by_date;
     app.preview = app.src.state.preview;
@@ -2621,8 +2626,8 @@ mod tests {
     fn the_default_state_is_an_ordinary_open() {
         let d = State::default();
         assert!(d.preview);
-        assert!(!d.search);
-        // the past list searches what was said from the start; the others not
+        // every list searches what was said from the start
+        assert!(d.search);
         assert!(d.search_past);
         assert!(!d.by_date);
         assert_eq!(Mode::from_key(d.mode), Mode::All);
@@ -3103,24 +3108,24 @@ mod tests {
         assert_eq!(ids(&a), ["%1", "%2", "%3"]);
     }
 
-    /// The past list searches what was said from an ordinary open, the live lists
-    /// filter on their rows, and ctrl-t flips the list on screen alone. With one
-    /// shared switch, turning the past list's off would have turned the live
-    /// lists' on, and the reverse.
+    /// Every list searches what was said from an ordinary open, and ctrl-t flips
+    /// the list on screen alone: turning it off to jump by name among the live
+    /// sessions must leave the past list searching, and the other way round.
     #[test]
-    fn the_past_list_searches_what_was_said_and_the_live_ones_do_not() {
+    fn ctrl_t_switches_the_list_on_screen_alone() {
         let mut a = app(THREE);
-        a.search_past = true; // what an ordinary open starts with, search allowed
-        assert!(!a.searching(), "a live list filters on what its rows show");
-        a.src.ended = Some(Box::new(|| PAST.to_string()));
-        a.step_mode(true); // shift-tab from the first stop is the past list
-        assert!(a.searching(), "the past list searches what was said");
+        (a.search, a.search_past) = (true, true); // an ordinary open, search allowed
+        assert!(a.searching(), "a live list searches what was said");
         a.toggle_search();
         assert!(!a.searching(), "ctrl-t turns it off there");
-        a.step_mode(false); // back to all sessions
-        assert!(!a.searching(), "…leaving the live lists as they were");
+        a.src.ended = Some(Box::new(|| PAST.to_string()));
+        a.step_mode(true); // shift-tab from the first stop is the past list
+        assert!(a.searching(), "…leaving the past list searching");
         a.toggle_search();
-        assert!(a.searching(), "ctrl-t on a live list");
+        assert!(!a.searching(), "ctrl-t turns the past list's off");
+        a.step_mode(false); // back to all sessions
+        a.toggle_search();
+        assert!(a.searching(), "ctrl-t on a live list again");
         a.step_mode(true);
         assert!(!a.searching(), "…leaves the past list off, as it was left");
     }

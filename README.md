@@ -560,8 +560,8 @@ Inside the picker:
 
 | key            | action                          |
 |----------------|---------------------------------|
-| type           | filter on what each row shows |
-| `Ctrl-t`       | …and on [what was said inside each session](#searching-what-a-session-said) (the [past](#past-sessions) list does from the start) |
+| type           | filter on what each row shows, and on [what was said inside each session](#searching-what-a-session-said) |
+| `Ctrl-t`       | stop searching what was said, or start again, in the list on screen |
 | `Ctrl-s`       | in the [idle](#what-a-session-is-doing) and [past](#newest-first-or-best-match-first) lists, order by when each session last said something, newest first |
 | `↑` / `↓`      | move (wraps around at the ends) |
 | `Ctrl-j` / `Ctrl-k` | same, and `Ctrl-n` / `Ctrl-p` too |
@@ -789,7 +789,7 @@ half of what you actually remember. What sends you looking for a session two day
 later is a word from **inside** it: a hostname, an error string, the name of the
 thing you were arguing about. None of that is on the row.
 
-So each claude session's transcript is indexed, and **`Ctrl-t`** makes typing search that too:
+So each claude session's transcript is indexed, and typing searches that too:
 
 ```
 pick ❯ worktree                                                          10/27
@@ -804,24 +804,26 @@ nowhere says why it did, and the preview shows the first few places the word tur
 up, with the term picked out. Nothing to configure and nothing on disk: the index
 lives in `$XDG_RUNTIME_DIR` and dies with the boot.
 
-**In the [past list](#past-sessions) it is on from the start; in the lists of
-live sessions it is off until you press `Ctrl-t`.** `Ctrl-t` switches the list on
-screen only, so turning it off in one never turns it on in the other, and the
-border shows `⌕` wherever it is on. Where it is off and a query matches no row,
-the list says `Ctrl-t` would search further.
+**It is on from the start, in every list.** `Ctrl-t` switches it off, and on
+again, for the list on screen only: turn it off to jump by name among the live
+sessions and the [past list](#past-sessions) goes on searching what was said. The
+border shows `⌕` wherever it is on, and where it is off and a query matches no
+row, the list says `Ctrl-t` would search further.
 
-The past list searches by default because that list is history, and what you
-remember about a conversation from last week is what was said in it, a link or
-an error string, far more often than its title. With it off, a merge request URL
-pasted there matched no row and the list answered "Nothing matches", while rses,
-which always searched content, found the very sessions it came from (taimux
-finds four, since its index also keeps the URLs a session fetched). Searching
-every indexed conversation costs 42 to 57 ms per keystroke here, 794 of them in
-24 MB. The live lists stay off because they are for jumping to a session already
-on screen: the row is what you know there, and a hit from inside some other
-transcript is only another row to read past.
+It used to start off everywhere, and what that cost is the one search people
+actually reach for. What you remember about a conversation is what was said in
+it, a link or an error string, far more often than its title: a merge request
+URL pasted into the past list matched no row and the list answered "Nothing
+matches", while rses, which always searched content, found the very sessions it
+came from (taimux finds four, since its index also keeps the URLs a session
+fetched). The past list went on first, and the live lists followed.
 
-The live lists' default was once a safety feature, too. fzf
+Each list reads only the conversations it can show, told apart by file name, so
+a keystroke on a live list reads 38 index files here (3.1 MB) and one on the
+past list the other 756 (18.8 MB), rather than all 794 every time; searching the
+lot was 42 to 57 ms.
+
+The default was once OFF for a safety reason. fzf
 reads a pasted line break as Enter, and the only thing stopping the picker
 accepting on a paste is that [a pasted line matches no session](#notes). Searching
 transcripts hands it something to match: measured over a few hundred real
@@ -834,8 +836,8 @@ came back the day search shipped, with a host going down behind it. Off by
 default, typing matches rows exactly as it always did.
 
 That reason is gone: the picker reads a paste as a paste (see
-[the picker](#the-picker)), which is also what made it safe to turn search on
-for the past list.
+[the picker](#the-picker)), which is also what made it safe to turn search on by
+default.
 
 Three things about how it matches, each of which had to be that way:
 
@@ -994,8 +996,8 @@ tightly.
 **`Ctrl-s`** keeps the matches in date order instead, and the border says
 `by date` while it is on. It is bound on this list and on the
 [idle](#what-a-session-is-doing) one, the two with a date worth sorting by, and
-it stays on through `Tab`, like `Ctrl-t`. The cursor stays on the conversation
-it was on, so a second press puts you back exactly where the first one started.
+it stays on through `Tab`, for both. The cursor stays on the conversation it was
+on, so a second press puts you back exactly where the first one started.
 
 It is **not** "leave every match where it stands", which is what fzf's
 `--no-sort` does and what was tried first. The ranking was doing a second job
@@ -1733,7 +1735,8 @@ inside each of those:
   landed in the agent behind the popup. Bracketed paste arrives here as one
   event carrying its own text: its first line joins the query, the rest is
   dropped, and there is nothing left to guard against. The `Ctrl-t` default and
-  the paste drain both existed for that bug; the drain is gone.
+  the paste drain both existed for that bug, and both are gone: search is on
+  from the start.
 - **The mode is a variable.** fzf kept no state, so the bash picker stored its
   mode in the border label and read it back by matching words in the text,
   carried the mode and search flag through every reload as quoted arguments, and

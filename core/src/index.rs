@@ -125,11 +125,48 @@ fn find_at(hay: &str, term: &str) -> Option<(usize, usize)> {
     Some((hay[..b].chars().count(), term.chars().count()))
 }
 
+/// Which conversations a search reads.
+///
+/// The index keeps the live panes' and the past list's side by side, and a list
+/// can only ever show its own: a hit in a past conversation has no row among the
+/// panes. Reading them all on every keystroke was a tolerable waste while the
+/// live lists searched only on ctrl-t; searching there by default made it 794
+/// files a keystroke where 38 could ever match.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Scope {
+    /// Everything, for `taimux snips`.
+    All,
+    /// The panes', this host's and other hosts'.
+    Live,
+    /// The past list's.
+    Past,
+}
+
+impl Scope {
+    /// Decided on the FILE NAME, so a file outside the scope is never opened.
+    fn wants(self, file: &str) -> bool {
+        match self {
+            Scope::All => true,
+            Scope::Live => !is_past_file(file),
+            Scope::Past => is_past_file(file),
+        }
+    }
+}
+
+/// Whether an index file is a past conversation's. Its row id is
+/// `dead:<agent>:<key>`, so its name opens with `dead_` and then the agent's
+/// name, a letter. The letter is the part that matters: a pane on a host called
+/// `dead` is `dead:%6`, filed as `dead__6`, and it is a live one.
+fn is_past_file(name: &str) -> bool {
+    name.strip_prefix("dead_")
+        .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_alphabetic()))
+}
+
 /// pane id to the snippet that says why that row is in the list.
 ///
 /// Every term has to be in the blob, the same rule the row is kept by. A row
 /// whose session merely mentions one of them is not a hit.
-pub fn snippets(q: &Query) -> HashMap<String, String> {
+pub fn snippets(q: &Query, scope: Scope) -> HashMap<String, String> {
     let mut out = HashMap::new();
     if q.terms.is_empty() {
         return out;
@@ -138,6 +175,9 @@ pub fn snippets(q: &Query) -> HashMap<String, String> {
         return out;
     };
     for e in dir.flatten() {
+        if !scope.wants(&e.file_name().to_string_lossy()) {
+            continue;
+        }
         let Some((pane, blob)) = read_entry(&e.path()) else {
             continue;
         };
@@ -411,6 +451,24 @@ mod tests {
         assert_eq!(age(0, 172800), "2d");
         // a clock that has gone backwards is not a negative age
         assert_eq!(age(2000, 1000), "now");
+    }
+
+    /// A list reads only the conversations it can show, told apart by file name
+    /// before anything is opened. A pane on a host called `dead` is still live.
+    #[test]
+    fn a_search_reads_only_the_conversations_its_list_can_show() {
+        let past = key_for(&past_id("claude", "/p/a.jsonl"));
+        let (pane, remote, odd) = (key_for("%57"), key_for("ha:%6"), key_for("dead:%6"));
+        assert!(Scope::Past.wants(&past) && !Scope::Live.wants(&past));
+        for live in [&pane, &remote, &odd] {
+            assert!(
+                Scope::Live.wants(live) && !Scope::Past.wants(live),
+                "{live}"
+            );
+        }
+        assert!([&past, &pane, &remote, &odd]
+            .iter()
+            .all(|f| Scope::All.wants(f)));
     }
 
     fn sess(mtime: i64, pane: &str, key: &str) -> Session {

@@ -1394,19 +1394,19 @@ IFEED
 fi
 
 # ============================================================================
-section "the past list searches what was said, from the start"
+section "every list searches what was said, from the start"
 # ============================================================================
-# rses always searched what a conversation said. taimux's past list only did
-# once Ctrl-t was pressed, so a URL pasted into it matched no row and the list
-# said "Nothing matches" about a session rses found at once. It searches content
-# from the start now; the live lists still filter on their rows, and a list not
-# searching content says Ctrl-t would.
-QSOCK="taimux-pastsearch-$$"
+# rses always searched what a conversation said. taimux only did once Ctrl-t was
+# pressed, so a URL pasted into the past list matched no row and the list said
+# "Nothing matches" about a session rses found at once. Every list searches
+# content from the start now, Ctrl-t switches the list on screen alone, and a
+# list not searching content says Ctrl-t would.
+QSOCK="taimux-search-$$"
 qtmux() { tmux -f /dev/null -L "$QSOCK" "$@"; }
 if [ ! -x "$KBIN" ]; then
-  skip "the past list's content search (no taimux built; run just build)"
+  skip "the default content search (no taimux built; run just build)"
 elif ! command -v tmux >/dev/null 2>&1; then
-  skip "the past list's content search (no tmux here to drive it in)"
+  skip "the default content search (no tmux here to drive it in)"
 else
   QT="$TMP/pastsearch"; mkdir -p "$QT/run/taimux/index"
   cat > "$QT/feed" <<'QFEED'
@@ -1426,6 +1426,9 @@ QFEED
   QURL='https://git.example.test/group/project/-/merge_requests/273'
   printf 'idx 1 %s dead:claude:/p/old.jsonl /p/old.jsonl\nwe went through %s together\n' \
     "$qnow" "$QURL" > "$QT/run/taimux/index/dead_claude__p_old_jsonl"
+  # …and what the live session said, which its row does not show either.
+  printf 'idx 1 %s %%01 /p/live.jsonl\norange marmalade on the live pane\n' \
+    "$qnow" > "$QT/run/taimux/index/_01"
 
   qscreen() { qtmux capture-pane -p 2>/dev/null; }
   qwait() {   # $1 = text wanted on screen
@@ -1442,15 +1445,23 @@ QFEED
     "TAIMUX_SELF=$QT/feed TAIMUX_SEARCH=1 TAIMUX_SESSIONS=1 TAIMUX_REMOTE=0 \
      XDG_RUNTIME_DIR=$QT/run $KBIN tui >$QT/chosen 2>$QT/err" 2>/dev/null
   qexpect "the live list comes up" "row-01"
-  hasnt "…filtering on its rows, not on what was said" "$(qscreen | sed -n '1p')" "⌕"
+  has   "…searching what was said from the start" "$(qscreen | sed -n '1p')" "⌕"
+  qtmux send-keys -l "marmalade" 2>/dev/null
+  n=0; while [ "$n" -lt 60 ] && ! qscreen | sed -n '4,11p' | grep -q "orange marmalade"; do n=$((n+1)); sleep 0.05; done
+  has   "…so a word only its transcript holds finds the live session" \
+        "$(qscreen | sed -n '4,11p')" "orange marmalade"
+  qtmux send-keys C-u 2>/dev/null
   qtmux send-keys -l "$QURL" 2>/dev/null
-  qexpect "a URL no live row shows matches nothing there" "Nothing matches"
-  qexpect "…and the note names the key that would search further" \
+  qexpect "a URL no live session said matches nothing there" "Nothing matches"
+  hasnt "…and, searching already, offers no further key" "$(qscreen)" "ctrl-t searches"
+  qtmux send-keys C-t 2>/dev/null
+  qexpect "ctrl-t turns the live list's search off, and the note then names it" \
           "ctrl-t searches what was said in them too"
+  hasnt "…with the border no longer claiming a search" "$(qscreen | sed -n '1p')" "⌕"
   qtmux send-keys C-u 2>/dev/null
   qtmux send-keys BTab 2>/dev/null
   n=0; while [ "$n" -lt 60 ] && ! qscreen | sed -n '1p' | grep -q "past sessions"; do n=$((n+1)); sleep 0.05; done
-  has   "the past list searches what was said from the start" "$(qscreen | sed -n '1p')" "⌕"
+  has   "the past list keeps its own search on" "$(qscreen | sed -n '1p')" "⌕"
   qtmux send-keys -l "$QURL" 2>/dev/null
   qexpect "…so the same URL finds the conversation it was said in" "cherry tart"
   hasnt "…and only that one"                  "$(qscreen | sed -n '4,11p')" "apple pie"
