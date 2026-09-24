@@ -23,13 +23,23 @@
 #     way round it either.
 #
 # So the attach step trusts nothing about how this run went. It asks the API
-# whether a release exists for the version in Cargo.toml, and attaches to it if
-# one does and it is missing its asset. A run where release-please did nothing
-# finds no release and exits quietly. That is how the other hosts
+# whether a release exists for the version in Cargo.toml, and attaches to it
+# only when that release's TAG IS THE COMMIT THIS RUN BUILT. A run where
+# release-please did nothing finds no release, or one tagged on an earlier
+# commit, and exits quietly. That is how the other hosts
 # get taimux, since two of them cannot build it (no cargo) and a plain build
 # here would not run there anyway (glibc 2.43 on one, 2.41 on another). See
 # scripts/install-release.sh, which is the downloader, and the dotfiles repo's
 # run_after_30-install-taimux.sh, which calls the same API.
+#
+# The tag check is load-bearing, and its absence cost a release its binary.
+# Cargo.toml keeps the released version until the NEXT release is cut, so on
+# every ordinary push after one, "is there a release for this version" said
+# yes, and the step uploaded that push's unreleased build over the released
+# asset with --clobber, under the released version number: v0.17.0 was carrying
+# a build of a later commit within two pushes, and the two runs one of those
+# pushes set off raced each other's --clobber until one failed on a 404. The
+# same holds for crates.io below, where a wrong upload cannot be taken back.
 #
 # Config lives in release-please-config.json plus .release-please-manifest.json.
 # The parts worth knowing, since JSON cannot hold a comment:
@@ -117,6 +127,15 @@ jobs:
             exit 0
           fi
 
+          # Only the tagged commit's own build belongs on the release. Any later
+          # push still reads the released version out of Cargo.toml, and its
+          # binary is code that release never contained (see the header).
+          tagged=$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)
+          if [ "$tagged" != "$GITHUB_SHA" ]; then
+            echo "$tag is $tagged, not this commit ($GITHUB_SHA): nothing to attach"
+            exit 0
+          fi
+
           chmod +x taimux
           mv taimux taimux-x86_64-linux-musl
 
@@ -193,6 +212,16 @@ jobs:
 
           if ! gh release view "v$v" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "no release v$v: this run cut nothing, nothing to publish"
+            echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          # The same rule as the attach job, and it matters more here: a later
+          # push still reads v$v out of Cargo.toml, and if the release run's own
+          # publish had failed, this would put code v$v never contained on
+          # crates.io under its number, for good.
+          tagged=$(gh api "repos/$GITHUB_REPOSITORY/commits/v$v" --jq .sha)
+          if [ "$tagged" != "$GITHUB_SHA" ]; then
+            echo "v$v is $tagged, not this commit ($GITHUB_SHA): nothing to publish"
             echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
 
