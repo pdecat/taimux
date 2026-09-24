@@ -832,6 +832,10 @@ if [ -x "$WBIN" ]; then
     else
       skip "no agent panes here to shape-check the daemon's answer"
     fi
+    # Asked all of that by the binary that started it, it is still there: a
+    # daemon is only sent away for being another build.
+    r=0; kill -0 "$DPID" 2>/dev/null || r=1
+    eq "…and a daemon from this very binary is kept" "0" "$r"
     # The version refusal (a daemon left running by an older build answers rows
     # that look perfectly right) is driven in the crate's own tests, against a
     # fake listener: the alternative here is keeping an old binary around to run.
@@ -841,6 +845,27 @@ if [ -x "$WBIN" ]; then
     kill "$DPID" 2>/dev/null
     skip "a live daemon (the socket never appeared)"
   fi
+  unset TAIMUX_SOCKET
+
+  # The BUILD refusal needs no old binary, because a copy is all a build ever
+  # leaves behind: another file, with the same version and the same rows. Until
+  # the handshake named the binary, the one left running from a build before
+  # passed as current and went on answering with the old code. The real binary
+  # has to refuse this one and send it away rather than take its rows.
+  cp "$WBIN" "$TMP/taimux-other-build"
+  export TAIMUX_SOCKET="$TMP/other-build-socket"
+  "$TMP/taimux-other-build" serve & OPID=$!
+  n=0; while [ "$n" -lt 40 ] && [ ! -S "$TAIMUX_SOCKET" ]; do n=$((n+1)); sleep 0.05; done
+  if [ -S "$TAIMUX_SOCKET" ]; then
+    "$WBIN" list >/dev/null 2>&1
+    n=0; while [ "$n" -lt 40 ] && kill -0 "$OPID" 2>/dev/null; do n=$((n+1)); sleep 0.05; done
+    r=0; kill -0 "$OPID" 2>/dev/null && r=1
+    eq "a daemon started from another build is refused and sent away" "0" "$r"
+  else
+    skip "a daemon from another build (the socket never appeared)"
+  fi
+  kill "$OPID" 2>/dev/null; wait "$OPID" 2>/dev/null
+  rm -f "$TAIMUX_SOCKET" "$TMP/taimux-other-build"
   unset TAIMUX_SOCKET
   export TAIMUX_SOCKET="$TMP/no-such-socket"
 

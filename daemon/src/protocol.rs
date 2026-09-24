@@ -25,16 +25,39 @@ use taimux_core::{panes, paths, version};
 /// the daemon crate's own version IS the binary's.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// The shape of the rows this build serves, which the `rows` handshake names
-/// beside the version.
+/// Which binary FILE this process was started from, which the `rows` handshake
+/// names beside the version.
 ///
-/// The version alone cannot say it. A build from the checkout changes the rows
-/// without a release to bump the version, so a daemon the build before started
-/// would pass the check and go on serving the old shape: rows still well-formed,
-/// only missing what the new picker reads, with nothing to show it but a sort
-/// that quietly stopped doing anything. Bump it whenever a row gains, loses or
-/// moves a field.
-const SHAPE: &str = "rows/2";
+/// The version alone cannot tell two builds apart. Only a release bumps it, so
+/// every build from the checkout carries the same one, and a daemon the build
+/// before left running passed the check and went on answering with the old
+/// code: rows still well-formed, built by whatever the scan used to do, with
+/// nothing to show it. A row that gained a field came through without it, and a
+/// change to how a state is read did not come through at all.
+///
+/// A build always writes a NEW file, since the one a process is running cannot
+/// be written to while it runs, so the file a process started from says which
+/// build it is. `/proc/self/exe` still names that file once a build has replaced
+/// it on disk. Read once per process: it cannot change under a running one.
+fn build() -> &'static str {
+    static BUILD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BUILD.get_or_init(|| identity(Path::new("/proc/self/exe")))
+}
+
+/// A file as `<device>:<inode>:<mtime>`, or `-` where it cannot be read.
+fn identity(path: &Path) -> String {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).map_or_else(
+        |_| "-".to_string(),
+        |m| format!("{}:{}:{}", m.dev(), m.ino(), m.mtime()),
+    )
+}
+
+/// The line a `rows` answer opens with, which both ends build the same way and
+/// the client compares: the version, and the binary behind it.
+fn stamp() -> String {
+    format!("{} {}", VERSION, build())
+}
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 /// How often the loop looks up from waiting to ask whether it has been idle long
@@ -75,7 +98,7 @@ fn handle(
         // and the process still listening is the old. Its rows would then be
         // built by whatever the scan used to do, which is invisible precisely
         // because they are still well-formed rows. So the client compares this
-        // line against its own version and does the work itself when they
+        // line against its own (see `stamp`) and does the work itself when they
         // differ, and a daemon too old to know this word answers `!unknown
         // request`, which is the same answer to the same question.
         //
@@ -83,12 +106,7 @@ fn handle(
         // because the two have to describe the SAME answer: a daemon replaced
         // between the two calls would pass the check and then serve rows from
         // the other build.
-        "rows" => format!(
-            "{} {}\n{}",
-            VERSION,
-            SHAPE,
-            panes::list_rows(prober, captures)
-        ),
+        "rows" => format!("{}\n{}", stamp(), panes::list_rows(prober, captures)),
         "version" => format!("{}\n", VERSION),
         "ping" => "pong\n".to_string(),
         "quit" => "bye\n".to_string(),
@@ -228,7 +246,7 @@ pub fn rows() -> Option<String> {
 fn rows_at(path: &Path) -> Option<String> {
     let body = ask_at(path, "rows")?;
     let (ver, rows) = body.split_once('\n')?;
-    if ver.split_once(' ') != Some((VERSION, SHAPE)) {
+    if ver != stamp() {
         // …and ask it to stand down, or nothing ever replaces it. A daemon goes
         // home after five idle minutes, but being ASKED is what keeps it from
         // being idle, and a picker refusing this one is still asking it every
@@ -287,7 +305,7 @@ mod tests {
     /// here touches `TAIMUX_SOCKET` or the developer's live daemon.
     /// A `rows` answer from a daemon running this very build.
     fn this_build(rows: &str) -> &'static str {
-        Box::leak(format!("{} {}\n{}", VERSION, SHAPE, rows).into_boxed_str())
+        Box::leak(format!("{}\n{}", stamp(), rows).into_boxed_str())
     }
 
     fn fake(reply: &'static str) -> (std::path::PathBuf, std::thread::JoinHandle<String>) {
@@ -376,12 +394,24 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// A daemon on this very version still serving the old row shape, which is
-    /// what a build from the checkout leaves running when it changes the rows
-    /// without a release: refused and stood down like any other build, or the
-    /// new picker would sort on a field its rows do not have.
+    /// The gap the binary in the stamp closes: a daemon on this very version,
+    /// started from another file, which is what a build from the checkout leaves
+    /// running. The version cannot tell them apart, so it used to be trusted,
+    /// and its rows came from the code before the build.
     #[test]
-    fn a_daemon_serving_the_old_row_shape_is_refused() {
+    fn a_daemon_started_from_another_build_is_refused() {
+        let other: &'static str =
+            Box::leak(format!("{} 1:2:3\n%1\tw:1.1\t/h\n", VERSION).into_boxed_str());
+        let (path, srv) = fake_twice(other, "bye\n");
+        assert_eq!(rows_at(&path), None);
+        assert_eq!(srv.join().unwrap(), vec!["rows", "quit"]);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// …and one from before the stamp named the binary at all, whose line is the
+    /// bare version: refused and stood down the same way.
+    #[test]
+    fn a_daemon_whose_line_names_no_binary_is_refused() {
         let (path, srv) = fake_twice(
             concat!(env!("CARGO_PKG_VERSION"), "\n%1\tw:1.1\t/h\n"),
             "bye\n",
@@ -389,6 +419,26 @@ mod tests {
         assert_eq!(rows_at(&path), None);
         assert_eq!(srv.join().unwrap(), vec!["rows", "quit"]);
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// A build is a new file, and that is what the identity sees: a copy of a
+    /// binary is another build as far as the handshake goes, while a hard link
+    /// (which is how a launcher can point at one) is the same file.
+    #[test]
+    fn a_copy_is_another_file_and_a_hard_link_is_the_same_one() {
+        let d = std::env::temp_dir().join(format!("taimux-id-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let (bin, copy, link) = (d.join("bin"), d.join("copy"), d.join("link"));
+        std::fs::write(&bin, "a build").unwrap();
+        std::fs::copy(&bin, &copy).unwrap();
+        std::fs::hard_link(&bin, &link).unwrap();
+        assert_ne!(identity(&bin), identity(&copy));
+        assert_eq!(identity(&bin), identity(&link));
+        assert_eq!(identity(&d.join("nothing")), "-");
+        // and this process can name its own
+        assert_eq!(build().split(':').count(), 3, "{}", build());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// A daemon too old to know the word answers the error the protocol already

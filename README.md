@@ -1586,11 +1586,16 @@ of its own: a daemon left listening by the previous build answers rows that are
 still perfectly well-formed, just made by the code that shipped before. So the
 request the picker uses (`rows`) answers with the daemon's own version on the
 first line, and a daemon too old to know the word answers the protocol's
-`!unknown request`, which is the same refusal. The line names the **shape** of
-the rows as well (`rows/2`), because the version alone cannot catch a build from
-the checkout: it changes the rows without a release to bump the version, and a
-daemon the build before left running would otherwise go on serving rows short of
-the field the new picker sorts on.
+`!unknown request`, which is the same refusal.
+
+The line names the **binary** as well, the file the daemon was started from, as
+device, inode and mtime. The version alone cannot tell two builds apart, because
+only a release bumps it: every build from a checkout carries the same one, so a
+daemon the previous build left running used to pass the check and go on
+answering with the old code. A build always writes a new file (the one a process
+is running cannot be written to), and `/proc/self/exe` still names the old one
+after it has been replaced on disk, so each side can say exactly which build it
+is, and a picker trusts only a daemon started from its own.
 
 Refusing it is not enough on its own, and this is the half that is easy to miss:
 being *asked* is what keeps a daemon from being idle, so a picker that merely
