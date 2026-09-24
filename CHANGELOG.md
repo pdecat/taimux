@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.0](https://github.com/pdecat/taimux/compare/v0.17.0...v0.18.0) (2026-09-24)
+
+
+### Features
+
+* ctrl-s sorts idle sessions by their last message ([88d7eb1](https://github.com/pdecat/taimux/commit/88d7eb1f9d6465af0e1226ec4df7f29d19595a57))
+* ctrl-s sorts past sessions by date ([277536d](https://github.com/pdecat/taimux/commit/277536d0935248f157a72ae28191ff3c3ac0ea87))
+
+
+### Bug fixes
+
+* a daemon left running by an earlier build is sent away ([51ca605](https://github.com/pdecat/taimux/commit/51ca6056bc93f59e32b384badaacedb814e099e8))
+* a scan that lands after Tab no longer rewrites the past list ([e72e58a](https://github.com/pdecat/taimux/commit/e72e58aa14e0cf78d44c3e614a1911b14cab9d64))
+
 ## [0.17.0](https://github.com/pdecat/taimux/compare/v0.16.0...v0.17.0) (2026-09-22)
 
 
