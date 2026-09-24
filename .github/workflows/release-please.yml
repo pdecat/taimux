@@ -64,6 +64,15 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      # The way to finish a crates.io publish that a release's own run could not.
+      # The tag rule below means no later commit may publish a release, which is
+      # right, and also means a re-run is the only other way to try again, and a
+      # re-run replays the workflow as it was, bug and all.
+      tag:
+        description: "A release to finish publishing to crates.io, e.g. v0.18.0 (from that tag's own commit)"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -195,7 +204,11 @@ jobs:
       id-token: write
       contents: read
     steps:
+      # A dispatch naming a release checks out that release's commit, which is
+      # what the tag rule below then accepts; anything else is this run's own.
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.sha }}
 
       # Decided BEFORE authenticating, so a run with nothing to publish never
       # asks crates.io for a token at all. Same rule as the attach job: ask the
@@ -218,10 +231,13 @@ jobs:
           # The same rule as the attach job, and it matters more here: a later
           # push still reads v$v out of Cargo.toml, and if the release run's own
           # publish had failed, this would put code v$v never contained on
-          # crates.io under its number, for good.
+          # crates.io under its number, for good. Checked against what was
+          # checked out rather than $GITHUB_SHA, which a dispatch naming a
+          # release does not share.
+          head=$(git rev-parse HEAD)
           tagged=$(gh api "repos/$GITHUB_REPOSITORY/commits/v$v" --jq .sha)
-          if [ "$tagged" != "$GITHUB_SHA" ]; then
-            echo "v$v is $tagged, not this commit ($GITHUB_SHA): nothing to publish"
+          if [ "$tagged" != "$head" ]; then
+            echo "v$v is $tagged, not this commit ($head): nothing to publish"
             echo "publish=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
 
@@ -248,8 +264,51 @@ jobs:
       # --no-verify because the crates were already built and tested by `check`
       # on this exact commit; re-verifying here would rebuild all four to learn
       # what CI already knows.
+      #
+      # **In rounds, leaving out whatever is already up**, because one pass is
+      # not enough and cannot be retried as it stands. After each upload cargo
+      # waits for the index to show the crate before it packages the crates that
+      # need it, and it waits 60 s: fixed on stable, since `publish.timeout` is
+      # only read under the nightly `-Zpublish-timeout`. On v0.18.0 the index
+      # took longer, so taimux-core went up and the other three were abandoned.
+      # A plain re-run then fails outright: cargo checks EVERY crate against the
+      # registry before uploading any, and refuses the lot over the one that
+      # exists (`crate taimux-core@0.18.0 already exists`). So each round asks
+      # crates.io which crates are up and excludes those, and a round cut short
+      # by the index is simply followed by another once it has caught up. The
+      # same loop is what a re-run or a dispatch naming the release goes through.
       - name: cargo publish --workspace
         if: steps.gate.outputs.publish == 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: cargo publish --workspace --no-verify
+          V: ${{ steps.gate.outputs.version }}
+        run: |
+          mapfile -t crates < <(cargo metadata --no-deps --format-version 1 |
+            jq -r '.packages[] | select(.publish == null or (.publish | length) > 0) | .name')
+          # An empty list would read below as "all 0 of them are up" and pass
+          # having published nothing, and a failed `cargo metadata` gives one.
+          if [ "${#crates[@]}" -eq 0 ]; then
+            echo "no publishable crates found in the workspace" >&2
+            exit 1
+          fi
+          ua="User-Agent: taimux-release (github.com/$GITHUB_REPOSITORY)"
+          for round in 1 2 3 4 5 6; do
+            exclude=()
+            for c in "${crates[@]}"; do
+              if curl -sf -H "$ua" "https://crates.io/api/v1/crates/$c/$V" >/dev/null 2>&1; then
+                exclude+=(--exclude "$c")
+              fi
+            done
+            if [ $(( ${#exclude[@]} / 2 )) -eq "${#crates[@]}" ]; then
+              echo "all ${#crates[@]} crates are on crates.io at $V"
+              exit 0
+            fi
+            echo "round $round: ${#crates[@]} crates, $(( ${#exclude[@]} / 2 )) already up"
+            if cargo publish --workspace --no-verify "${exclude[@]}"; then
+              exit 0
+            fi
+            echo "round $round did not finish; giving the index a minute"
+            sleep 60
+          done
+          echo "still not all up after $round rounds" >&2
+          exit 1
