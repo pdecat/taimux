@@ -414,7 +414,8 @@ pub fn plan(
                 screen = bigger;
             }
         }
-        let st = state::merge(&screen, e.hook_state(id, pid).as_deref());
+        let hook = e.hook_state(id, pid);
+        let st = state::merge(&screen, hook.as_deref());
         if st.as_str() != "idle" && !o.include_busy {
             p.skipped.push(format!(
                 "{} {}  {}, {}: rerun when idle, or --include-busy",
@@ -422,6 +423,18 @@ pub fn plan(
                 tgt,
                 ver,
                 st.as_str()
+            ));
+            continue;
+        }
+        // Idle is not the same as nothing to lose. A turn that left a shell or a
+        // subagent running is over and its prompt is free, which is why the list
+        // shows it idle, but that work runs as the session's children and dies
+        // with it. This used to be one question, answered "working" for both, on
+        // a pane whose two watchers were due to report hours later.
+        if state::background(&screen, hook.as_deref()) && !o.include_busy {
+            p.skipped.push(format!(
+                "{} {}  {}, work still in flight: rerun once it reports back, or --include-busy",
+                id, tgt, ver
             ));
             continue;
         }
@@ -1117,6 +1130,8 @@ mod plan_tests {
         /// how many panes were zoomed to be read, since a zoom is something the
         /// user watching that window sees happen
         zooms: std::cell::Cell<usize>,
+        /// pane -> the hook line's state, for the panes that have one
+        hooks: HashMap<String, String>,
         transcript: String,
         now: i64,
     }
@@ -1132,8 +1147,8 @@ mod plan_tests {
             }
             bigger
         }
-        fn hook_state(&self, _pane: &str, _pid: i32) -> Option<String> {
-            None
+        fn hook_state(&self, pane: &str, _pid: i32) -> Option<String> {
+            self.hooks.get(pane).cloned()
         }
         fn version_of_pid(&self, pid: i32) -> Option<String> {
             self.vers.get(&pid).cloned()
@@ -1174,6 +1189,7 @@ mod plan_tests {
             resolved,
             zoomed: HashMap::new(),
             zooms: std::cell::Cell::new(0),
+            hooks: HashMap::new(),
             transcript: r#"{"type":"user","timestamp":"2020-01-01T00:00:00Z"}"#.to_string(),
             now: 1788312225,
         }
@@ -1242,6 +1258,39 @@ mod plan_tests {
         let p = plan_of(&e, &opts());
         assert!(p.go.is_empty());
         assert!(p.skipped[0].contains("rerun when idle, or --include-busy"));
+
+        let mut o = opts();
+        o.include_busy = true;
+        assert_eq!(plan_of(&e, &o).go.len(), 1);
+    }
+
+    /// Idle at its prompt, and still not restartable without asking: the shells
+    /// a finished turn left running are the session's children and die with it.
+    #[test]
+    fn a_pane_with_work_in_flight_waits_for_include_busy() {
+        let mut e = fake();
+        e.screens.insert(
+            "%1".into(),
+            "✻ Cogitated for 1m 3s · done 4:55 PM · 2 shells still running\n❯ \n".into(),
+        );
+        let p = plan_of(&e, &opts());
+        assert!(p.go.is_empty());
+        assert!(
+            p.skipped[0].contains("work still in flight"),
+            "{:?}",
+            p.skipped
+        );
+
+        // The line alone says so as well, on a screen that shows nothing of it.
+        let mut e = fake();
+        e.hooks.insert("%1".into(), "bg".into());
+        let p = plan_of(&e, &opts());
+        assert!(p.go.is_empty());
+        assert!(
+            p.skipped[0].contains("work still in flight"),
+            "{:?}",
+            p.skipped
+        );
 
         let mut o = opts();
         o.include_busy = true;

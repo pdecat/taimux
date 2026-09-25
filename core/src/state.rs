@@ -131,7 +131,9 @@ pub enum Turn {
     Done,
     /// Over, with work it started still in flight: `✻ Sautéed for 11s · done
     /// 11:39 PM · 1 shell still running`. The session will wake itself when that
-    /// work reports back, so as far as the list is concerned it is busy.
+    /// work reports back, but until then it sits at a free prompt like any other,
+    /// so the list reads it as idle. What it does change is `restart`'s answer,
+    /// since that work would die with the session: see `background`.
     Background,
 }
 
@@ -251,9 +253,29 @@ pub fn turn_marker(screen: &str) -> Option<Turn> {
         .flatten()
 }
 
-/// Mid-turn, or waiting on work the turn left running.
+/// Mid-turn.
+///
+/// Not a turn that is over but left work running, which it used to include. The
+/// pane that settled it had finished at 4:55 PM with two watchers still going,
+/// due to report at 19:00 and 19:25, and the list would have called it working
+/// for the two and a half hours it sat at an empty prompt. Whether such work is
+/// in flight is a question of its own, `background`, and only `restart` asks it.
 pub fn is_working(screen: &str) -> bool {
-    matches!(turn_marker(screen), Some(Turn::Running | Turn::Background))
+    turn_marker(screen) == Some(Turn::Running)
+}
+
+/// Work a finished turn left in flight, a background shell or subagent that will
+/// report back as a turn of its own: the hook line reads `bg`, which `Stop` writes
+/// when its `background_tasks` lists anything, or the turn line says `· 1 shell
+/// still running`.
+///
+/// The session is idle meanwhile and the list says so, but that work runs as its
+/// children and would die with it, so this is what keeps `restart` off it.
+/// Either sign is enough and neither can clear the other, because the only cost
+/// of a wrong yes is a restart that asks for `--include-busy`, and a wrong no
+/// kills the work.
+pub fn background(screen: &str, hook: Option<&str>) -> bool {
+    hook == Some("bg") || turn_marker(screen) == Some(Turn::Background)
 }
 
 /// The screen's own answer, in the order the bash version asks: a dialog wins
@@ -339,8 +361,17 @@ pub fn correct(hook: &str, hook_at: i64, turn: Option<(crate::turn::Event, i64)>
 /// the case this must not break: a session streaming a reply shows no turn line
 /// at all while it does so, and then `run` is the only thing that knows.
 ///
-/// `bg` reads as working: the turn is over, but work it started is still in
-/// flight and the session will wake itself when it reports back.
+/// Nor is a finished line that left work running, `· 2 shells still running`,
+/// though it reads idle on its own. When that work reports back it opens a turn
+/// of its own, which a typed prompt would mark on screen and a report need not,
+/// so while that turn streams the lowest turn line can still be the one that
+/// launched the work, and `run` is again the only thing that knows.
+///
+/// `bg` reads as idle, and gives way to a counter on screen exactly as `idle`
+/// does: the turn is over and the prompt is free, whatever it left running. It
+/// used to read as working, which kept a session in the working list for as long
+/// as its slowest watcher ran, hours at a time. The work itself is what
+/// `background` answers, for `restart`, which is the one caller it matters to.
 pub fn merge(screen: &str, hook: Option<&str>) -> State {
     let screen_state = classify(screen);
     if screen_state == State::Input {
@@ -350,13 +381,13 @@ pub fn merge(screen: &str, hook: Option<&str>) -> State {
         Some("input" | "ask") if screen_state == State::Idle => State::Idle,
         Some("ask") if screen_state == State::Run => State::Run,
         Some("ask") => State::Input,
-        Some("idle") if screen_state == State::Run => State::Run,
+        Some("idle" | "bg") if screen_state == State::Run => State::Run,
         Some("run") if screen_state == State::Idle && turn_marker(screen) == Some(Turn::Done) => {
             State::Idle
         }
         // a session mid-permission is working, as far as the list is concerned
-        Some("run" | "input" | "bg") => State::Run,
-        Some("idle") => State::Idle,
+        Some("run" | "input") => State::Run,
+        Some("idle" | "bg") => State::Idle,
         // No line, or one nobody recognises: a screen that could not be read reads
         // as idle, exactly as it always did.
         _ if screen_state == State::Unknown => State::Idle,
@@ -565,14 +596,31 @@ mod tests {
     }
 
     #[test]
-    fn a_turn_that_left_work_running_is_busy() {
+    fn a_turn_that_left_work_running_is_idle_with_work_in_flight() {
+        // The pane this was found on: done at 4:55 PM, two watchers due to report
+        // at 19:00 and 19:25, and an empty prompt box the list called working.
         let s = at_prompt("✻ Sautéed for 11s · done 11:39 PM · 1 shell still running");
         assert_eq!(turn_marker(&s), Some(Turn::Background));
-        assert_eq!(classify(&s), State::Run);
+        assert_eq!(classify(&s), State::Idle);
         // whether or not the line knew about it
-        for hook in [None, Some("idle"), Some("run"), Some("bg")] {
-            assert_eq!(merge(&s, hook), State::Run, "{hook:?}");
+        for hook in [None, Some("idle"), Some("bg")] {
+            assert_eq!(merge(&s, hook), State::Idle, "{hook:?}");
         }
+        // …except a `run`, which may be the turn that work's report opened:
+        // nothing on screen marks where that turn starts
+        assert_eq!(merge(&s, Some("run")), State::Run);
+        // The work is `background`'s question, and either sign answers it.
+        assert!(background(&s, None));
+        assert!(background(&s, Some("idle")));
+        assert!(background(&finished(), Some("bg")));
+        assert!(!background(&finished(), Some("idle")));
+        assert!(!background(&finished(), None));
+    }
+
+    #[test]
+    fn a_working_screen_overrules_a_bg_line_as_it_does_an_idle_one() {
+        // a counter under a `bg` line is the report's turn, already under way
+        assert_eq!(merge(&running(), Some("bg")), State::Run);
     }
 
     #[test]
@@ -677,9 +725,9 @@ mod tests {
         // a session mid-permission is working, for the list's purposes
         assert_eq!(merge(&running(), Some("input")), State::Run);
         assert_eq!(merge(UNREADABLE, Some("input")), State::Run);
-        // and one waiting on its background work is too
-        assert_eq!(merge(UNREADABLE, Some("bg")), State::Run);
-        assert_eq!(merge(&finished(), Some("bg")), State::Run);
+        // and one waiting on its background work is at its prompt all the same
+        assert_eq!(merge(UNREADABLE, Some("bg")), State::Idle);
+        assert_eq!(merge(&finished(), Some("bg")), State::Idle);
     }
 
     #[test]

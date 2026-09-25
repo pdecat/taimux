@@ -94,7 +94,7 @@ The column before the summary answers it, in three states:
 |---|---|
 | `✳` | **waiting for an answer**, the one worth looking for (and the only one in colour) |
 | `◐` | working: a turn is in flight |
-| blank | idle at the prompt, nothing to do |
+| blank | idle at the prompt, background work included: a turn that left a shell running is over |
 
 The column is two wide whichever it is, so every summary starts in the same place.
 
@@ -127,8 +127,11 @@ every other agent it is the only reading there is:
   a token count under it, and then come the title rule, the prompt box, its own
   rule and two status rows. Measured across 39 live panes it sat 2 to 9 lines up.
   A finished line ending `· 1 shell still running` is a turn that left work in
-  flight, and reads as working too, since the session will wake itself when that
-  work reports back;
+  flight. It reads as **idle**: the session will wake itself when that work
+  reports back, but until then its prompt is as free as any other. It used to
+  read as working, and one pane whose two watchers were due to report at 19:00
+  and 19:25 would have sat in the working list for two and a half hours at an
+  empty prompt. The work still counts, where it matters: see `bg` below;
 - **over**: that finished line, or `⎿  Interrupted · What should Claude do
   instead?`, which is all an interrupted reply leaves behind;
 - **idle**: the prompt box, but only the live one, the `❯` with a rule directly
@@ -224,7 +227,7 @@ The state is one of five:
 | `input` | a permission was asked for, which auto mode may have answered unseen |
 | `ask` | the same, **confirmed on screen**: Claude's own `permission_prompt` notification goes out once a prompt has sat there unanswered for about six seconds, and never for one auto mode settled. AskUserQuestion and MCP forms count too |
 | `idle` | the turn is over |
-| `bg` | the turn is over, but `Stop` listed background work still in flight (a shell, a subagent), and the session will wake itself when it reports back. Reads as working, and `restart` leaves it alone |
+| `bg` | the turn is over, but `Stop` listed background work still in flight (a shell, a subagent), and the session will wake itself when it reports back. Reads as **idle**, since its prompt is free, but `restart` still leaves it alone: that work runs as the session's children and would die with it |
 
 `ask` is what lets a session read as waiting when its screen cannot show the
 dialog: a pane too short to draw one, or a viewport scrolled away from it.
@@ -1370,7 +1373,11 @@ Only panes **behind** the installed version, and only **idle** ones unless
 `--include-busy`: the transcript is appended per *completed* message, so
 restarting a working session drops its in-flight turn. A pane is settled when its
 screen shows a plain empty prompt box, no dialog is waiting, nothing is typed but
-unsent, and its transcript has been quiet for 45s.
+unsent, and its transcript has been quiet for 45s. An idle pane with **work still
+in flight** waits for `--include-busy` too, since a shell or a subagent its last
+turn left running is a child of the session and dies with it: the hook line
+reading `bg`, or a turn line ending `· 2 shells still running`, is enough. `taimux
+state <pane>` says so on a line of its own, since the list shows such a pane idle.
 
 The dialog check is **never** skipped, `--include-busy` or not: an `Enter` sent to
 a pane showing a permission prompt picks its highlighted option and approves a

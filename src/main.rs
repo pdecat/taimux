@@ -790,10 +790,13 @@ fn state_report(id: &str) -> i32 {
             None => "no turn line".to_string(),
         }
     );
-    println!(
-        "reading     {}",
-        state::merge(&screen, current.as_ref().map(|e| e.state.as_str())).as_str()
-    );
+    let hook_state = current.as_ref().map(|e| e.state.as_str());
+    // The one reading `restart` adds to the list's, and the one a row cannot show:
+    // said here so a refusal of a pane the list calls idle is not a mystery.
+    if state::background(&screen, hook_state) {
+        println!("background  work still in flight, so restart leaves it alone");
+    }
+    println!("reading     {}", state::merge(&screen, hook_state).as_str());
     0
 }
 
