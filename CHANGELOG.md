@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.19.0](https://github.com/pdecat/taimux/compare/v0.18.0...v0.19.0) (2026-09-25)
+
+
+### Features
+
+* every list searches what was said from the start ([ad261c6](https://github.com/pdecat/taimux/commit/ad261c675fd5951f31548d3d9b70ab22550212b4))
+* the past list searches what was said from the start ([629c5f5](https://github.com/pdecat/taimux/commit/629c5f50fe75357f41a818f4d6ebfa4f711890c7))
+
+
+### Bug fixes
+
+* a turn that left shells running reads idle, and restart still spares it ([9fd2588](https://github.com/pdecat/taimux/commit/9fd2588d627fa676e6e2c826b4c5d60027e53dff))
+
 ## [0.18.0](https://github.com/pdecat/taimux/compare/v0.17.0...v0.18.0) (2026-09-24)
 
 
