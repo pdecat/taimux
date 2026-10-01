@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/pdecat/taimux/compare/v0.19.0...v0.20.0) (2026-10-01)
+
+
+### Features
+
+* an empty past list points at the live sessions a query matches ([c2a5510](https://github.com/pdecat/taimux/commit/c2a551048db325f0a3cea7b0df5f7a446d429418))
+
 ## [0.19.0](https://github.com/pdecat/taimux/compare/v0.18.0...v0.19.0) (2026-09-25)
 
 
