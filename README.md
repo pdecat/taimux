@@ -1072,6 +1072,23 @@ taimux cannot tell, and pretending otherwise would mean guessing.
 That is why this is "past sessions" rather than "ended" ones. It is the history,
 and a conversation you happen to be in right now is part of it.
 
+Leaving the open claude sessions out once cost a search. A merge request URL
+pasted here answered "Nothing matches" and no more, while the session that had
+opened it a week earlier sat in a pane one `Tab` away, so it was taken for a miss.
+So where this list keeps nothing for a query, it counts what the live list would
+keep for the same one, and says so:
+
+```
+Nothing matches https://git.example.com/group/project/-/merge_requests/13
+A session still open in a pane matches it: Tab shows it.
+```
+
+`Tab`, because this list is the last stop on the ring and the next stop round
+lists every live session. The count is the live list's own answer, its `Ctrl-t`
+switch included, so the note never promises a row that `Tab` then fails to show.
+It is only worked out when this list comes up empty: anywhere else it would be a
+second layout on every keystroke, for a line nobody sees.
+
 ### A few decisions worth knowing
 
 - **There is no cap.** There used to be one, at the newest 200, and what it cost

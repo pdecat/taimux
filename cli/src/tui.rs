@@ -651,6 +651,12 @@ fn room_for_tag(width: u16, count: &str) -> bool {
 /// so here, which is when a query that matches no row may still be in a
 /// transcript. A URL pasted into the past list with its search off found nothing
 /// and said nothing about why, which is exactly the moment to name the key.
+///
+/// `live_hits` is how many sessions still open in a pane the same query matches,
+/// counted only where the past list has nothing of its own (see `App::live_hits`).
+/// A claude session open in a pane is left out of the past list, so the session a
+/// pasted merge request URL came from sat one Tab away while this list said
+/// "Nothing matches" and no more, and the search was given up as a miss.
 fn empty_note(
     mode: Mode,
     query: &str,
@@ -658,6 +664,7 @@ fn empty_note(
     nothing_scanned: bool,
     ended: bool,
     search_hint: bool,
+    live_hits: usize,
 ) -> Vec<Line<'static>> {
     let mut lines: Vec<String> = Vec::new();
     if scanning {
@@ -676,6 +683,16 @@ fn empty_note(
         lines.push(format!("Nothing matches {}", query));
         if search_hint {
             lines.push("ctrl-t searches what was said in them too.".into());
+        }
+        // Tab, because the past list is the last stop on the ring and the next
+        // stop round lists every live session.
+        match live_hits {
+            0 => {}
+            1 => lines.push("A session still open in a pane matches it: Tab shows it.".into()),
+            n => lines.push(format!(
+                "{} sessions still open in panes match it: Tab shows them.",
+                n
+            )),
         }
         lines.push("ctrl-u clears it.".into());
     } else if mode == Mode::Dead {
@@ -823,6 +840,11 @@ struct App {
     /// "it is in the scan again" mean the session came back rather than the
     /// restart not having happened yet.
     restarting: HashMap<String, (Instant, String, usize, bool)>,
+    /// How many live sessions the query matches, while the past list is on
+    /// screen and matches none: what its empty note points at. Counted when the
+    /// query is applied rather than when the note is drawn, since a draw runs on
+    /// every tick and this lays out the live rows and reads their index files.
+    live_hits: usize,
 }
 
 /// How long a restarting row is held.
@@ -1373,18 +1395,18 @@ impl App {
         }
     }
 
-    /// The snippets the query earns, or none.
+    /// The snippets the query earns in `mode`'s list, or none.
     ///
     /// **The "at least TAIMUX_SEARCH_MIN characters" gate lives here, not in the
     /// layout**, exactly as it does in bash: under three characters a term is in
     /// every transcript and a match would say nothing. Handing the layout a
     /// snippet map for a one-letter query turns every row into a search hit.
-    fn snippets(&self) -> HashMap<String, String> {
-        if !self.searching() || self.query.chars().count() < search_min() {
+    fn snippets(&self, mode: Mode) -> HashMap<String, String> {
+        if !self.searching_in(mode) || self.query.chars().count() < search_min() {
             return HashMap::new();
         }
         // Only the conversations this list can show: see `index::Scope`.
-        let scope = if self.mode == Mode::Dead {
+        let scope = if mode == Mode::Dead {
             index::Scope::Past
         } else {
             index::Scope::Live
@@ -1392,10 +1414,15 @@ impl App {
         index::snippets(&index::Query::new(&self.query), scope)
     }
 
-    /// Whether typing searches what was said, for the list on screen: the past
-    /// list has its own switch, on by default, and every other list shares one.
+    /// Whether typing searches what was said, for the list on screen.
     fn searching(&self) -> bool {
-        if self.mode == Mode::Dead {
+        self.searching_in(self.mode)
+    }
+
+    /// …and for any list: the past list has its own switch, on by default, and
+    /// every other list shares one.
+    fn searching_in(&self, mode: Mode) -> bool {
+        if mode == Mode::Dead {
             self.search_past
         } else {
             self.search
@@ -1425,15 +1452,25 @@ impl App {
     /// buys fzf, and owning the state makes it a lookup.
     fn rebuild(&mut self) {
         let on = self.selected().map(|r| r.pane_id.clone());
+        self.all = self.layout(self.mode);
+        self.apply_query();
+        self.sel = on
+            .and_then(|id| self.view.iter().position(|&i| self.all[i].pane_id == id))
+            .unwrap_or(0);
+        self.clamp();
+    }
+
+    /// `mode`'s list, laid out for the query typed, before the query filters it.
+    fn layout(&self, mode: Mode) -> Vec<rows::Row> {
         // The ended list is a different list, not this one filtered, so its own
         // rows are already only ended ones and asking for the filter as well
         // would be asking twice.
-        let (lines, only) = if self.mode == Mode::Dead {
+        let (lines, only) = if mode == Mode::Dead {
             (&self.past, "")
         } else {
-            (&self.tsv, self.mode.filter())
+            (&self.tsv, mode.filter())
         };
-        self.all = rows::build(
+        rows::build(
             lines,
             &rows::Input {
                 cur: &self.src.cur,
@@ -1444,21 +1481,37 @@ impl App {
                 // A row held through a restart keeps the version it had, so the
                 // one you just pressed ctrl-x on stays in this list, marked ↻,
                 // until it comes back on the installed one and drops out of it.
-                outdated: self.mode == Mode::Outdated,
+                outdated: mode == Mode::Outdated,
                 query: &self.query,
-                snips: self.snippets(),
+                snips: self.snippets(mode),
                 // A live pane can publish no title at all: claude sets one at a
                 // turn boundary, so one restored by tmux-resurrect and not
                 // prompted since has nothing there.
                 ptitles: index::pane_titles(),
                 restarting: self.restarting.keys().cloned().collect(),
             },
-        );
+        )
+    }
+
+    /// Filter the rows in hand by the query, and recount what the past list's
+    /// empty note points at.
+    fn apply_query(&mut self) {
         self.view = filter(&self.all, &self.query, &self.matcher, self.dated());
-        self.sel = on
-            .and_then(|id| self.view.iter().position(|&i| self.all[i].pane_id == id))
-            .unwrap_or(0);
-        self.clamp();
+        self.live_hits = self.count_live_hits();
+    }
+
+    /// How many rows the live list would keep for this query, asked only where
+    /// the past list keeps none: anywhere else it would be a second layout and
+    /// a second read of the index on every keystroke, for a note nobody sees.
+    ///
+    /// It is the live list's OWN answer, its search switch included, rather
+    /// than a count of index files that hold the words, so the note never
+    /// promises a row that Tab does not then show.
+    fn count_live_hits(&self) -> usize {
+        if self.mode != Mode::Dead || !self.view.is_empty() || self.query.trim().is_empty() {
+            return 0;
+        }
+        filter(&self.layout(Mode::All), &self.query, &self.matcher, false).len()
     }
 
     /// The query changed.
@@ -1476,7 +1529,7 @@ impl App {
         if self.searching() {
             self.rebuild();
         } else {
-            self.view = filter(&self.all, &self.query, &self.matcher, self.dated());
+            self.apply_query();
             self.clamp();
         }
     }
@@ -1649,6 +1702,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
         pending_since: Instant::now(),
         client: None,
         restarting: HashMap::new(),
+        live_hits: 0,
         src,
     };
     // Whatever a previous instance was doing when the terminal grew under it.
@@ -1807,6 +1861,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
                         app.tsv.trim().is_empty(),
                         app.src.ended.is_some(),
                         search_enabled() && !app.searching(),
+                        app.live_hits,
                     ))
                     .style(Style::default().fg(Color::DarkGray))
                     .wrap(Wrap { trim: false }),
@@ -2216,6 +2271,7 @@ mod tests {
             pending_since: Instant::now(),
             client: None,
             restarting: HashMap::new(),
+            live_hits: 0,
         };
         a.fetch();
         a.rebuild();
@@ -2262,6 +2318,7 @@ mod tests {
             pending_since: Instant::now(),
             client: None,
             restarting: HashMap::new(),
+            live_hits: 0,
         };
         a.fetch();
         a.rebuild();
@@ -2560,15 +2617,15 @@ mod tests {
         };
 
         // nothing running at all, which is the reported case
-        let none = text(empty_note(Mode::All, "", false, true, false, false));
+        let none = text(empty_note(Mode::All, "", false, true, false, false, 0));
         assert!(none.contains("No agent sessions on this machine"), "{none}");
         assert!(none.contains("Esc closes this"), "{none}");
         // …and with an ended list to offer, it offers it
-        let none_ended = text(empty_note(Mode::All, "", false, true, true, false));
+        let none_ended = text(empty_note(Mode::All, "", false, true, true, false, 0));
         assert!(none_ended.contains("Tab reaches the conversations that ended"));
 
         // something IS running, just not in this state
-        let filtered = text(empty_note(Mode::Input, "", false, false, true, false));
+        let filtered = text(empty_note(Mode::Input, "", false, false, true, false, 0));
         assert!(
             filtered.contains("Nothing is waiting for an answer right now"),
             "{filtered}"
@@ -2576,10 +2633,11 @@ mod tests {
         assert!(!filtered.contains("No agent sessions"), "{filtered}");
 
         // a query nobody matches, which says what to press to undo it
-        let q = text(empty_note(Mode::All, "zzz", false, false, true, false));
+        let q = text(empty_note(Mode::All, "zzz", false, false, true, false, 0));
         assert!(q.contains("Nothing matches zzz"), "{q}");
         assert!(q.contains("ctrl-u"), "{q}");
         assert!(!q.contains("ctrl-t"), "no search to offer: {q}");
+        assert!(!q.contains("still open"), "no live hit to point at: {q}");
         // …and names ctrl-t when what was said is not being searched but could
         // be, which is where a pasted URL used to find nothing and say nothing
         let hint = text(empty_note(
@@ -2589,14 +2647,44 @@ mod tests {
             false,
             true,
             true,
+            0,
         ));
         assert!(
             hint.contains("ctrl-t searches what was said in them too"),
             "{hint}"
         );
+        // …and points at the live list when the match is a session still open
+        // in a pane, which the past list leaves out
+        let one = text(empty_note(
+            Mode::Dead,
+            "https://x/13",
+            false,
+            false,
+            true,
+            false,
+            1,
+        ));
+        assert!(
+            one.contains("A session still open in a pane matches it: Tab shows it."),
+            "{one}"
+        );
+        assert!(one.contains("ctrl-u"), "{one}");
+        let two = text(empty_note(
+            Mode::Dead,
+            "https://x/13",
+            false,
+            false,
+            true,
+            false,
+            2,
+        ));
+        assert!(
+            two.contains("2 sessions still open in panes match it: Tab shows them."),
+            "{two}"
+        );
 
         // the ended list, before anything has ended
-        let dead = text(empty_note(Mode::Dead, "", false, false, true, false));
+        let dead = text(empty_note(Mode::Dead, "", false, false, true, false, 0));
         assert!(
             dead.contains("No past conversations have been found here yet"),
             "{dead}"
@@ -2605,13 +2693,13 @@ mod tests {
         // …and before the first scan has come back at all, which is the state a
         // popup used to show as an empty box. It outranks every other case,
         // because none of them is known yet.
-        let scanning = text(empty_note(Mode::All, "", true, true, true, false));
+        let scanning = text(empty_note(Mode::All, "", true, true, true, false, 0));
         assert!(
             scanning.contains("Looking for agent sessions"),
             "{scanning}"
         );
         assert!(!scanning.contains("No agent sessions"), "{scanning}");
-        let scanning_q = text(empty_note(Mode::Input, "zzz", true, false, true, false));
+        let scanning_q = text(empty_note(Mode::Input, "zzz", true, false, true, false, 0));
         assert!(
             scanning_q.contains("Looking for agent sessions"),
             "{scanning_q}"
@@ -2987,6 +3075,46 @@ mod tests {
                 "dead:claude:/n.jsonl"
             ]
         );
+    }
+
+    /// The past list leaves out a claude session still open in a pane, so a
+    /// query whose only match is one of those used to read as a miss: a pasted
+    /// merge request URL answered "Nothing matches" there while the session that
+    /// opened it was one Tab away. Where the past list keeps nothing, it now
+    /// counts what the live list would keep, and that live list is the next stop.
+    #[test]
+    fn an_empty_past_list_counts_the_live_sessions_the_query_matches() {
+        // only the live "banana bread" says it
+        let mut a = app_past("banana");
+        assert!(a.view.is_empty(), "no past row says it: {:?}", ids(&a));
+        assert_eq!(a.live_hits, 1);
+        // …recounted as the query changes, on the path that only re-filters
+        // too, which is the one typing takes with this list's search off
+        a.query = "zzz".into();
+        a.query_changed();
+        assert_eq!(a.live_hits, 0, "nothing anywhere says that");
+        a.query = "bread".into();
+        a.query_changed();
+        assert_eq!(a.live_hits, 1);
+        // …and Tab from the past list does land on the live one, as the note says
+        assert_eq!(Mode::Dead.next(true, true), Mode::All);
+        assert_eq!(Mode::Dead.next(true, false), Mode::All);
+        a.step_mode(false);
+        assert_eq!(a.mode, Mode::All);
+        assert_eq!(ids(&a), ["%2"]);
+
+        // a past list with a match of its own needs no pointer, even when a live
+        // row says it too
+        let b = app_past("tart");
+        assert!(!b.view.is_empty());
+        assert_eq!(b.live_hits, 0);
+
+        // and the live lists never count it: the rows there are the live ones
+        let mut c = app(THREE);
+        c.query = "zzz".into();
+        c.query_changed();
+        assert!(c.view.is_empty());
+        assert_eq!(c.live_hits, 0);
     }
 
     /// Why by date is not simply "leave every match where it stands". The
