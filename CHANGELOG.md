@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.21.0](https://github.com/pdecat/taimux/compare/v0.20.0...v0.21.0) (2026-10-03)
+
+
+### Features
+
+* rows read what Claude Code says each session is doing ([7bdcddd](https://github.com/pdecat/taimux/commit/7bdcddd6fae069bbcb34958b60be25e1f7b6f38e))
+
+
+### Bug fixes
+
+* restart leaves a pane whose conversation moved to the background ([8b90ae8](https://github.com/pdecat/taimux/commit/8b90ae89a1b26219338a2b16c55e0fbd2feb79eb))
+
 ## [0.20.0](https://github.com/pdecat/taimux/compare/v0.19.0...v0.20.0) (2026-10-01)
 
 
