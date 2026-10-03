@@ -22,6 +22,7 @@ pub mod sha256;
 pub mod sqlite;
 pub mod stat;
 pub mod state;
+pub mod status;
 pub mod tmux;
 pub mod transcript;
 pub mod turn;

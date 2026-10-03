@@ -93,9 +93,128 @@ pub fn field(line: &str, key: &str) -> String {
     first(line, key).unwrap_or_default()
 }
 
+/// The first `"key": <integer>` in the text, looking past decoys as `scan` does.
+pub fn number(text: &str, key: &str) -> Option<i64> {
+    let needle = format!("\"{}\"", key);
+    let mut from = 0;
+    while let Some(at) = text[from..].find(&needle) {
+        let after = &text[from + at + needle.len()..];
+        if let Some(rest) = after.trim_start().strip_prefix(':') {
+            let rest = rest.trim_start();
+            let end = rest
+                .char_indices()
+                .find(|&(i, c)| !(c.is_ascii_digit() || (i == 0 && c == '-')))
+                .map_or(rest.len(), |(i, _)| i);
+            if let Ok(n) = rest[..end].parse() {
+                return Some(n);
+            }
+        }
+        from += at + needle.len();
+    }
+    None
+}
+
+/// Calls `f(offset, byte, depth, in_string)` for every byte of some JSON, the
+/// depth being the nesting BEFORE that byte, so the two readers below agree on
+/// what structure is: a brace inside a string is not.
+fn walk(text: &str, mut f: impl FnMut(usize, u8, usize, bool)) {
+    let (mut depth, mut in_str, mut esc) = (0usize, false, false);
+    for (i, b) in text.bytes().enumerate() {
+        f(i, b, depth, in_str);
+        if in_str {
+            match (esc, b) {
+                (true, _) => esc = false,
+                (false, b'\\') => esc = true,
+                (false, b'"') => in_str = false,
+                _ => {}
+            }
+        } else {
+            match b {
+                b'"' => in_str = true,
+                b'{' | b'[' => depth += 1,
+                b'}' | b']' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+    }
+}
+
+/// The objects of a JSON array, each as its own text, in order: what
+/// `claude agents --json` prints, one pretty-printed object per session.
+pub fn objects(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = None;
+    walk(text, |i, b, depth, s| match (s, b) {
+        (false, b'{') if depth == 1 => start = Some(i),
+        (false, b'}') if depth == 2 => {
+            if let Some(from) = start.take() {
+                out.push(&text[from..=i]);
+            }
+        }
+        _ => {}
+    });
+    out
+}
+
+/// An object with every nested value replaced by `null`, so a field can only be
+/// read at the top level.
+///
+/// A Claude Code session file keeps `formerNames`, a list of objects that each
+/// carry a `sessionId` of their own. Which of those comes first in the text is
+/// the writer's business, not a contract, and scanning the whole object could
+/// read a conversation the session has already left.
+pub fn top_level(obj: &str) -> String {
+    let mut out = Vec::with_capacity(obj.len());
+    walk(obj, |_, b, depth, s| match (s, b) {
+        (false, b'{' | b'[') if depth == 1 => out.extend_from_slice(b"null"),
+        // a nested value's own bytes, its closing bracket included, sit deeper
+        _ if depth <= 1 => out.push(b),
+        _ => {}
+    });
+    String::from_utf8(out).unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_integer_field() {
+        assert_eq!(number(r#"{"pid":67279,"n":-3}"#, "pid"), Some(67279));
+        assert_eq!(number("{\n  \"n\" : -3\n}", "n"), Some(-3));
+        assert_eq!(number(r#"{"pid":"67279"}"#, "pid"), None);
+        // a quoted mention first, then the real field
+        assert_eq!(number(r#"{"k":["pid"],"pid":12}"#, "pid"), Some(12));
+    }
+
+    #[test]
+    fn an_array_splits_into_its_objects_whatever_their_strings_hold() {
+        let t = "[\n  {\n    \"id\": \"a\",\n    \"name\": \"has } and { in it\"\n  },\n  {\"id\":\"b\",\"meta\":{\"x\":[1,{\"y\":2}]}}\n]";
+        let o = objects(t);
+        assert_eq!(o.len(), 2);
+        assert_eq!(scan(o[0], "name").as_deref(), Some("has } and { in it"));
+        assert!(o[1].ends_with("}}"), "{}", o[1]);
+        assert_eq!(objects("[]"), Vec::<&str>::new());
+        assert_eq!(objects("not json"), Vec::<&str>::new());
+    }
+
+    /// The case `top_level` exists for: a session file names the conversations
+    /// it left in a nested list, and those must never be read as its own.
+    #[test]
+    fn a_nested_value_cannot_answer_for_a_top_level_field() {
+        let t = r#"{"formerNames":[{"name":"x","sessionId":"OLD"}],"pid":1,"sessionId":"NEW","tags":{"a":"}"}}"#;
+        let flat = top_level(t);
+        assert_eq!(
+            flat,
+            r#"{"formerNames":null,"pid":1,"sessionId":"NEW","tags":null}"#
+        );
+        assert_eq!(scan(&flat, "sessionId").as_deref(), Some("NEW"));
+        assert_eq!(
+            scan(t, "sessionId").as_deref(),
+            Some("OLD"),
+            "why this exists"
+        );
+    }
 
     #[test]
     fn a_plain_field() {

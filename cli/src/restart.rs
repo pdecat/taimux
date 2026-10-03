@@ -336,6 +336,12 @@ pub trait Env {
         None
     }
     fn hook_state(&self, pane: &str, pid: i32) -> Option<String>;
+    /// What the session says it is doing, Claude Code's own status
+    /// (`status::of`), which outranks the hook line wherever there is one.
+    /// `None` by default, and for every fixture that predates it.
+    fn own_state(&self, _pid: i32) -> Option<state::State> {
+        None
+    }
     fn version_of_pid(&self, pid: i32) -> Option<String>;
     fn cwd_of(&self, pid: i32) -> Option<String>;
     fn argv_of(&self, pid: i32) -> Vec<String>;
@@ -415,7 +421,7 @@ pub fn plan(
             }
         }
         let hook = e.hook_state(id, pid);
-        let st = state::merge(&screen, hook.as_deref());
+        let st = state::reading(&screen, e.own_state(pid), hook.as_deref());
         if st.as_str() != "idle" && !o.include_busy {
             p.skipped.push(format!(
                 "{} {}  {}, {}: rerun when idle, or --include-busy",
@@ -611,6 +617,9 @@ impl Env for Live {
     }
     fn hook_state(&self, pane: &str, pid: i32) -> Option<String> {
         taimux_core::hook::hook_state_of(pane, pid)
+    }
+    fn own_state(&self, pid: i32) -> Option<state::State> {
+        taimux_core::status::of(pid).and_then(|o| o.state())
     }
     fn version_of_pid(&self, pid: i32) -> Option<String> {
         version_of_pid(pid, &self.versions_dir)
@@ -1132,6 +1141,8 @@ mod plan_tests {
         zooms: std::cell::Cell<usize>,
         /// pane -> the hook line's state, for the panes that have one
         hooks: HashMap<String, String>,
+        /// pid -> what the session says it is doing, for the ones that say
+        own: HashMap<i32, state::State>,
         transcript: String,
         now: i64,
     }
@@ -1149,6 +1160,9 @@ mod plan_tests {
         }
         fn hook_state(&self, pane: &str, _pid: i32) -> Option<String> {
             self.hooks.get(pane).cloned()
+        }
+        fn own_state(&self, pid: i32) -> Option<state::State> {
+            self.own.get(&pid).copied()
         }
         fn version_of_pid(&self, pid: i32) -> Option<String> {
             self.vers.get(&pid).cloned()
@@ -1190,6 +1204,7 @@ mod plan_tests {
             zoomed: HashMap::new(),
             zooms: std::cell::Cell::new(0),
             hooks: HashMap::new(),
+            own: HashMap::new(),
             transcript: r#"{"type":"user","timestamp":"2020-01-01T00:00:00Z"}"#.to_string(),
             now: 1788312225,
         }
@@ -1262,6 +1277,27 @@ mod plan_tests {
         let mut o = opts();
         o.include_busy = true;
         assert_eq!(plan_of(&e, &o).go.len(), 1);
+    }
+
+    /// What the session says outranks a screen and a hook line that both look
+    /// idle: a permission granted to a tool that is still running shows neither
+    /// a counter nor a fresh line, and restarting it would kill the tool.
+    #[test]
+    fn a_session_that_says_it_is_busy_is_busy() {
+        let mut e = fake();
+        e.hooks.insert("%1".into(), "input".into());
+        e.own.insert(11, state::State::Run);
+        let p = plan_of(&e, &opts());
+        assert!(p.go.is_empty());
+        assert!(
+            p.skipped[0].contains("run: rerun when idle"),
+            "{:?}",
+            p.skipped
+        );
+        // and an Esc the hook line never heard of frees it again
+        e.hooks.insert("%1".into(), "run".into());
+        e.own.insert(11, state::State::Idle);
+        assert_eq!(plan_of(&e, &opts()).go.len(), 1);
     }
 
     /// Idle at its prompt, and still not restartable without asking: the shells

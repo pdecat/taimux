@@ -56,6 +56,16 @@ pub fn parse_stat(stat: &str) -> Option<(i64, i64, i64)> {
     Some((pgrp, tty_nr, tpgid))
 }
 
+/// When the process started, in clock ticks since boot: field 22 of its stat,
+/// as written there. A pid is reused, a start time on top of it is not, which is
+/// what lets a file named after a pid be checked against the process now
+/// holding it.
+pub fn start_time(stat: &str) -> Option<&str> {
+    let rest = stat.get(stat.rfind(')')? + 1..)?;
+    // field 3 is the first after the comm, so field 22 is offset 19
+    rest.split_whitespace().nth(19)
+}
+
 /// argv as one space-joined line, tabs flattened so it survives a TSV row.
 pub fn read_argv(pid: i32) -> Option<String> {
     let raw = fs::read(format!("/proc/{}/cmdline", pid)).ok()?;
@@ -153,6 +163,18 @@ mod tests {
         // pid comm state ppid pgrp session tty_nr tpgid ...
         let s = "1234 (bash) S 1 1234 1234 34816 1234 4194304 0 0";
         assert_eq!(parse_stat(s), Some((1234, 34816, 1234)));
+    }
+
+    /// Field 22 off a real line (claude's, 2026-10-03), past a comm that would
+    /// shift every field if it were split on whitespace.
+    #[test]
+    fn the_start_time_is_field_22() {
+        let s = "145337 (claude) S 66559 145337 66559 34874 145337 4194560 1271817 0 1 0 \
+                 61417 10861 0 0 20 0 21 0 260099474 74880266240 145466";
+        assert_eq!(start_time(s), Some("260099474"));
+        let odd = s.replace("(claude)", "(a ) b)");
+        assert_eq!(start_time(&odd), Some("260099474"));
+        assert_eq!(start_time("1 (x) S 1"), None);
     }
 
     #[test]

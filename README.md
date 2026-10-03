@@ -52,6 +52,7 @@ ones. Same pane scan, same reading of what each session is doing. See
 ## Contents
 
 - [What a session is doing](#what-a-session-is-doing)
+- [In Claude Code's own words](#in-claude-codes-own-words)
 - [Told, rather than guessed](#told-rather-than-guessed)
 - [Narrow windows](#narrow-windows)
 - [Supported agents](#supported-agents)
@@ -108,9 +109,11 @@ glyph a title does carry is therefore stripped, not shown.
 
 The pane's own **screen** is one reading of it, off a single capture per pane
 (about 2 ms each). For Claude Code it is the corrective rather than the source,
-since the session also reports on itself and its transcript records what no
-report covers (see [Told, rather than guessed](#told-rather-than-guessed)); for
-every other agent it is the only reading there is:
+since Claude Code publishes what each of its sessions is doing (see [In Claude
+Code's own words](#in-claude-codes-own-words)), and where it does not, the
+session reports on itself and its transcript records what no report covers (see
+[Told, rather than guessed](#told-rather-than-guessed)); for every other agent it
+is the only reading there is:
 
 - **waiting**: a dialog draws a numbered choice list, and the lowest prompt line
   on screen is the one that owns it, with the footer read over the last few lines
@@ -188,7 +191,64 @@ moving it would be a guess: when the session is not in that state, and while you
 have a query typed, since the row numbers then count what matches rather than what
 the list was given.
 
+## In Claude Code's own words
+
+Every interactive Claude Code process keeps a small file about itself,
+`~/.claude/sessions/<pid>.json`, and rewrites it whenever its state changes:
+`busy`, `waiting` (with what for: `permission prompt`, `input needed`, `dialog
+open`) or `idle`, the conversation it is on now, and its tmux pane. That is the
+session's own state machine rather than a reading of its outside, so a claude row
+asks it **first**, and falls back to the hook line and the screen only where
+there is no such file. It needs nothing installed.
+
+It earns that place on exactly the cases the other readings had to patch.
+Measured on Claude Code 2.1.288 in a throwaway tmux server, against a logging
+command hook and a 50 ms watch on the file, each time from the keypress:
+
+| | the session's own status | the hook line |
+|---|---|---|
+| a permission **granted**, the tool then running for 8 s | `busy` after 46 ms | nothing until the tool finished, 8 s later |
+| **Esc** part way through a reply | `idle` after 107 ms | nothing at all |
+| **Esc** on a permission prompt | `idle` after 101 ms | nothing at all |
+| a permission prompt appearing | `waiting` within 80 ms | `PermissionRequest` (which auto mode fires too), confirmed 6 s later |
+| `/clear` | the new conversation, at once | `SessionStart` |
+
+A dialog drawn on screen still outranks it, since that is the state which must
+never be wrong; the two agreed on every dialog measured. Three more things it
+does:
+
+- **A file is only believed for the process that wrote it.** Pids get handed
+  out again, so the file's `procStart` has to match the start time `/proc` gives
+  for the process holding that pid now.
+- **A background session is followed.** A pane running `claude attach <id>`
+  holds no session of its own: it shows one that agent view's supervisor runs
+  under another pid, and that session's file is the one read. The same goes for a
+  pane whose conversation was backgrounded from under it, which Claude Code
+  2.1.286 left behind as a client: its own file stops at whatever it said at that
+  moment (one read `busy` for 41 hours at an idle prompt), and its transcript
+  ends with a `continued-in` record naming the session it went to.
+- **An unfamiliar file is asked about the documented way.** The file is not an
+  interface Claude Code documents; `claude agents --json` is, and reads the same
+  store. So a file this does not recognise, one with no `status` in it, is looked
+  up there instead, one run of the CLI (about a tenth of a second) serving every
+  such pane for ten seconds.
+
+What it does not carry is the **permission mode**, and whether a finished turn
+left work in flight (`bg`): both still come from the hook line, below. Nor can a
+Claude Code mod supply the mode instead: on a Team or Enterprise plan the
+built-in `sec-default` guard keeps user-installed mods from seeing the events
+that carry it.
+
+`taimux state <pane>` prints what the session says, and where that came from, on
+its own line. `TAIMUX_CLAUDE_STATUS=0` turns the whole reading off, which leaves
+every row to the hook line and the screen exactly as before.
+
 ## Told, rather than guessed
+
+Where Claude Code says what a session is doing (above), that is the answer, and
+this section is what a row falls back to without it: an older version, or a file
+that cannot be read. The hook line is still the only source of the permission
+mode and of `bg` either way.
 
 Reading a pane from the outside has limits, and two of them matter:
 
@@ -1064,7 +1124,7 @@ where OpenCode can see it.
 ### Only claude can be told apart from a live pane
 
 Which conversation a pane is on is something the agent has to publish, and claude
-is the only one that does (see [Told, rather than guessed](#told-rather-than-guessed)).
+is the only one that does (see [In Claude Code's own words](#in-claude-codes-own-words)).
 So a **claude** session that is open in a pane is left out of this list, because
 it is already on every other one. A session belonging to any other agent is not:
 taimux cannot tell, and pretending otherwise would mean guessing.

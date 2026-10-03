@@ -395,6 +395,25 @@ pub fn merge(screen: &str, hook: Option<&str>) -> State {
     }
 }
 
+/// Claude Code's own word first, then the screen and the hook line as before.
+///
+/// `own` is the state a claude process publishes about itself (`status::Own`),
+/// and where there is one it is the answer: it is the session's own state, not a
+/// reading of its outside. It closes the two holes `merge` exists to patch, a
+/// permission granted (no hook fires until the tool has finished) and an Esc (no
+/// hook fires at all), and it never goes stale behind a backgrounded session.
+///
+/// A dialog on screen still outranks it, because that is the state that must
+/// never be wrong and keeping the rule costs nothing: the two agreed on every
+/// dialog measured, so this only matters if they ever stop agreeing.
+pub fn reading(screen: &str, own: Option<State>, hook: Option<&str>) -> State {
+    match own {
+        Some(s) if s != State::Input && awaits_input(screen) => State::Input,
+        Some(s) => s,
+        None => merge(screen, hook),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -776,5 +795,51 @@ mod tests {
         assert_eq!(correct("run", 2_000, Some((Over, 1_500))), "run");
         assert_eq!(correct("idle", 2_000, Some((Prompt, 1_983))), "idle");
         assert_eq!(correct("run", 2_000, None), "run");
+    }
+
+    /// Claude Code's own status is the answer wherever it has one, over a hook
+    /// line and a screen that both say otherwise: the cases that motivated it.
+    #[test]
+    fn claude_codes_own_status_is_the_answer_where_it_has_one() {
+        // a permission granted, the tool still running: the line still says
+        // `input` and the screen shows no counter yet
+        assert_eq!(
+            reading(&finished(), Some(State::Run), Some("input")),
+            State::Run
+        );
+        // an Esc, which no hook reports: the line still says `run`
+        assert_eq!(
+            reading(&streaming(), Some(State::Idle), Some("run")),
+            State::Idle
+        );
+        // a dialog the pane is too short to show
+        assert_eq!(
+            reading(UNREADABLE, Some(State::Input), Some("run")),
+            State::Input
+        );
+        // and a dialog ON screen still wins, whatever anyone says
+        for own in [State::Idle, State::Run] {
+            assert_eq!(reading(DIALOG, Some(own), Some("idle")), State::Input);
+        }
+    }
+
+    #[test]
+    fn without_it_the_reading_is_exactly_what_it_was() {
+        for hook in [
+            None,
+            Some("run"),
+            Some("input"),
+            Some("ask"),
+            Some("idle"),
+            Some("bg"),
+        ] {
+            for screen in [finished(), streaming(), running(), DIALOG.to_string()] {
+                assert_eq!(
+                    reading(&screen, None, hook),
+                    merge(&screen, hook),
+                    "{hook:?}"
+                );
+            }
+        }
     }
 }

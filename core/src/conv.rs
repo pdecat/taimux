@@ -3,8 +3,11 @@
 //! Comes first because the indexer needs it: nothing can be indexed until it is
 //! known which transcript each live pane is talking to.
 //!
-//! Two rungs here, in this order, and the order is the whole design:
+//! Three rungs here, in this order, and the order is the whole design:
 //!
+//! 0. **The session's own word**: the `sessionId` a claude process keeps in its
+//!    own status file (`status`), which follows a `/clear` the moment it happens
+//!    and needs no hook installed at all.
 //! 1. **The pane map**, written by a `SessionStart` hook, so it covers startup,
 //!    resume, clear and compact alike. Ranked top because it is rewritten on
 //!    every one of those, which means it tracks a `/clear` or an in-session
@@ -124,6 +127,11 @@ fn from_argv(argv: &[String]) -> (Option<String>, Option<String>, Option<String>
     (att, sid, res)
 }
 
+/// The background session a `claude attach <id>` argv names, if it is one.
+pub fn attach_id(argv: &[String]) -> Option<String> {
+    from_argv(argv).0
+}
+
 /// The transcript this pane's session is writing to, or None.
 ///
 /// `cwd` is claude's own working directory, and the pane map is only trusted
@@ -131,6 +139,19 @@ fn from_argv(argv: &[String]) -> (Option<String>, Option<String>, Option<String>
 /// `$TMUX_PANE` from the session that launched it) handing over its throwaway
 /// conversation.
 pub fn resolve_from_pane(pane: &str, cwd: &str, pid: i32) -> Option<Resolved> {
+    // The process's own word only. What a `claude attach` pane shows, or a pane
+    // whose conversation was backgrounded from under it, is a session another
+    // process is running: naming it here would have `restart` resume it a
+    // second time in this pane, both writing one transcript.
+    if let Some(t) = crate::status::of(pid)
+        .filter(|o| matches!(o.via, crate::status::Via::OwnFile | crate::status::Via::Cli))
+        .and_then(|o| o.transcript())
+    {
+        return Some(Resolved {
+            transcript: t,
+            why: "its own status file",
+        });
+    }
     let mf = claude_dir()
         .join("tmux-panes")
         .join(format!("{}.json", pane.trim_start_matches('%')));

@@ -61,6 +61,11 @@ export TAIMUX_SESSIONS=0
 # autostart turns it back on for its own pickers, and stops what it starts.
 export TAIMUX_DAEMON=0
 
+# And what Claude Code says about its own sessions OFF, for the same reason as
+# search: it reads ~/.claude/sessions, which is the developer's live state. Its
+# own section turns it on against a fixture.
+export TAIMUX_CLAUDE_STATUS=0
+
 PASS=0; FAIL=0
 ok() { PASS=$((PASS+1)); printf '  \033[32mok\033[0m   %s\n' "$1"; }
 no() { FAIL=$((FAIL+1)); printf '  \033[31mFAIL\033[0m %s\n       %s\n' "$1" "$2"; }
@@ -1797,6 +1802,82 @@ ZFAKE
 
   ztmux kill-server 2>/dev/null
   rm -f "$TMP/zoom-flag"
+fi
+
+# ============================================================================
+section "a session's own status: what Claude Code says outranks the hook line"
+# ============================================================================
+# Every claude process keeps sessions/<pid>.json about itself, and a row asks it
+# first (core/src/status.rs). Checked end to end because the join is on a REAL
+# pid: the file is believed only when its procStart matches /proc, so the one
+# thing that cannot be faked is a live process on a pty. Same rig as the zoomed
+# read above: a copy of bash named claude in a pane of a real tmux, and a fake
+# tmux on PATH answering for the pane list and the screen.
+CSBIN="$HERE/../target/release/taimux"
+CSSOCK="taimux-ownstatus-$$"
+cstmux() { tmux -f /dev/null -L "$CSSOCK" "$@"; }
+if [ ! -x "$CSBIN" ]; then
+  skip "a session's own status (no taimux built; run just build)"
+elif ! command -v tmux >/dev/null 2>&1; then
+  skip "a session's own status (no tmux here to host a pty)"
+else
+  CSH="$TMP/own"; mkdir -p "$CSH/bin" "$CSH/ft" "$CSH/run/taimux" "$CSH/cfg/sessions"
+  cp "$(command -v bash)" "$CSH/bin/claude"
+  cstmux new-session -d -x 80 -y 24 "exec '$CSH/bin/claude' -c 'read -r _'" 2>/dev/null
+  CSTTY=""; CSPID=""; csn=0
+  while [ "$csn" -lt 40 ]; do
+    CSTTY="$(cstmux display -p '#{pane_tty}' 2>/dev/null)"
+    CSPID="$(cstmux display -p '#{pane_pid}' 2>/dev/null)"
+    [ "$(cstmux display -p '#{pane_current_command}' 2>/dev/null)" = claude ] && break
+    csn=$((csn+1)); sleep 0.05
+  done
+  CSSTART="$(cut -d' ' -f22 "/proc/$CSPID/stat")"
+
+  # An idle prompt box under a finished turn line, and a hook line still saying
+  # `run`: what the screen corrects to idle on its own.
+  cat > "$CSH/ft/tmux" <<'CSFAKE'
+#!/usr/bin/env bash
+case "$*" in
+  *"#{pane_tty}"*) printf '%s\t%%09\ts:1.1\t%s\tclaude\tproj: own status\n' "$CSTTY" "$TMP" ;;
+esac
+if [ "$1" = capture-pane ]; then
+  if [ -e "$CSCOUNTER" ]; then printf '%s\n' "✽ Twisting… (35s · ↓ 1.6k tokens)"
+  else printf '%s\n' "✻ Crunched for 9m 55s · done 11:07 AM"; fi
+  printf '%s\n' "────────────────" "❯ " "────────────────" "  ⏵⏵ auto mode on · ? for shortcuts"
+fi
+exit 0
+CSFAKE
+  chmod +x "$CSH/ft/tmux"
+  printf '%s\trun\tauto\n' "$CSPID" > "$CSH/run/taimux/09"
+  csown() {  # status [waitingFor] [procStart]
+    printf '{"pid":%s,"sessionId":"8a011e50-0f0d","cwd":"%s","procStart":"%s","kind":"interactive","status":"%s"%s}\n' \
+      "$CSPID" "$TMP" "${3:-$CSSTART}" "$1" "${2:+,\"waitingFor\":\"$2\"}" > "$CSH/cfg/sessions/$CSPID.json"
+  }
+  csrow() {
+    PATH="$CSH/ft:$PATH" CSTTY="$CSTTY" TMP="$TMP" CSCOUNTER="$CSH/counter" \
+      XDG_RUNTIME_DIR="$CSH/run" CLAUDE_CONFIG_DIR="$CSH/cfg" TAIMUX_CLAUDE_STATUS="${1:-1}" \
+      "$CSBIN" list 2>/dev/null | awk -F'\t' '$1=="%09" {print $6}'
+  }
+
+  eq  "no file: the hook line and the screen, as before"   "idle"  "$(csrow)"
+  csown waiting "permission prompt"
+  # the dialog it is waiting on cannot be seen: a pane too short, or scrolled
+  eq  "a session that says it is waiting is waiting"       "input" "$(csrow)"
+  eq  "and it says what for"                               "claude says waiting (for permission prompt)" \
+      "$(PATH="$CSH/ft:$PATH" CSTTY="$CSTTY" TMP="$TMP" CSCOUNTER="$CSH/counter" XDG_RUNTIME_DIR="$CSH/run" \
+         CLAUDE_CONFIG_DIR="$CSH/cfg" TAIMUX_CLAUDE_STATUS=1 "$CSBIN" state %09 2>/dev/null \
+         | sed -n 's/^\(claude says [a-z]* ([^)]*)\).*/\1/p')"
+  eq  "TAIMUX_CLAUDE_STATUS=0 turns it off"                "idle"  "$(csrow 0)"
+  # a pid handed out again: the file was written by a process that died
+  csown busy "" 1
+  eq  "a file from an earlier process with the pid is ignored" "idle" "$(csrow)"
+  # an Esc, which no hook reports: the line still says run, the counter is up
+  csown idle; touch "$CSH/counter"
+  eq  "a session that says it is idle is idle"             "idle"  "$(csrow)"
+  rm -f "$CSH/cfg/sessions/$CSPID.json"
+  eq  "…where the counter alone would say it works"        "run"   "$(csrow)"
+
+  cstmux kill-server 2>/dev/null
 fi
 
 # ============================================================================

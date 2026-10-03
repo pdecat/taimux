@@ -731,6 +731,35 @@ fn state_report(id: &str) -> i32 {
         }
     };
     println!("pane        {}, {} pid {}", id, agent, pid);
+    // First, since it is the answer wherever there is one: `state::reading`.
+    let own = taimux_core::status::of(pid);
+    match &own {
+        Some(o) => println!(
+            "claude says {}{}, {}, conversation {}, from {}",
+            o.status,
+            if o.waiting_for.is_empty() {
+                String::new()
+            } else {
+                format!(" (for {})", o.waiting_for)
+            },
+            if o.at > 0 {
+                format!("since {}", ago(o.at))
+            } else {
+                "since an unknown time".to_string()
+            },
+            o.session_id.get(..8).unwrap_or(&o.session_id),
+            o.via.describe()
+        ),
+        None if agent == "claude" => println!(
+            "claude says nothing: no status file for this process{}",
+            if taimux_core::env::on("TAIMUX_CLAUDE_STATUS") {
+                ""
+            } else {
+                " (TAIMUX_CLAUDE_STATUS=0)"
+            }
+        ),
+        None => {}
+    }
     let raw = hook::hook_entry(id, pid);
     match &raw {
         Some(e) => println!(
@@ -796,7 +825,10 @@ fn state_report(id: &str) -> i32 {
     if state::background(&screen, hook_state) {
         println!("background  work still in flight, so restart leaves it alone");
     }
-    println!("reading     {}", state::merge(&screen, hook_state).as_str());
+    println!(
+        "reading     {}",
+        state::reading(&screen, own.as_ref().and_then(|o| o.state()), hook_state).as_str()
+    );
     0
 }
 

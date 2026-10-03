@@ -216,7 +216,18 @@ pub fn list_rows(
             }
         };
         let hook = crate::hook::current(id, pid);
-        let merged = crate::state::merge(&screen, hook.as_ref().map(|e| e.state.as_str()));
+        // What the session says it is doing, which is the answer wherever there
+        // is one: see `state::reading`. Only claude publishes it.
+        let own = if agent == "claude" {
+            crate::status::of(pid)
+        } else {
+            None
+        };
+        let merged = crate::state::reading(
+            &screen,
+            own.as_ref().and_then(|o| o.state()),
+            hook.as_ref().map(|e| e.state.as_str()),
+        );
         let last = hook
             .as_ref()
             .filter(|e| e.last > 0)
@@ -272,12 +283,17 @@ pub fn wire(rows: &str, since: bool) -> String {
 }
 
 /// What the session in one pane is doing, read exactly as the list reads it:
-/// the hook line brought up to date by the transcript, then the screen. For the
-/// callers that ask about a pane at a time, `print-cmds` and `resurrect`.
+/// what the session says about itself, else the hook line brought up to date by
+/// the transcript, then the screen. For the callers that ask about a pane at a
+/// time, `print-cmds` and `resurrect`.
 pub fn state_of(id: &str, pid: i32) -> crate::state::State {
     let screen = crate::tmux::capture(id).unwrap_or_default();
     let hook = crate::hook::current(id, pid);
-    crate::state::merge(&screen, hook.as_ref().map(|e| e.state.as_str()))
+    crate::state::reading(
+        &screen,
+        crate::status::of(pid).and_then(|o| o.state()),
+        hook.as_ref().map(|e| e.state.as_str()),
+    )
 }
 
 pub fn agent_rows() -> String {
