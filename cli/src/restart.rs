@@ -342,6 +342,11 @@ pub trait Env {
     fn own_state(&self, _pid: i32) -> Option<state::State> {
         None
     }
+    /// The background session this pane's conversation was moved into, when a
+    /// backgrounding left the pane's process behind as its client.
+    fn moved_to(&self, _pid: i32) -> Option<String> {
+        None
+    }
     fn version_of_pid(&self, pid: i32) -> Option<String>;
     fn cwd_of(&self, pid: i32) -> Option<String>;
     fn argv_of(&self, pid: i32) -> Vec<String>;
@@ -441,6 +446,18 @@ pub fn plan(
             p.skipped.push(format!(
                 "{} {}  {}, work still in flight: rerun once it reports back, or --include-busy",
                 id, tgt, ver
+            ));
+            continue;
+        }
+
+        // Its conversation runs on in agent view's supervisor. Resuming the
+        // transcript this pane started on would branch it from the point it was
+        // backgrounded, while the real one carries on elsewhere.
+        if let Some(sid) = e.moved_to(pid) {
+            let short = sid.get(..8).unwrap_or(&sid);
+            p.skipped.push(format!(
+                "{} {}  {}, its conversation moved to background session {}: claude attach {}",
+                id, tgt, ver, short, short
             ));
             continue;
         }
@@ -620,6 +637,11 @@ impl Env for Live {
     }
     fn own_state(&self, pid: i32) -> Option<state::State> {
         taimux_core::status::of(pid).and_then(|o| o.state())
+    }
+    fn moved_to(&self, pid: i32) -> Option<String> {
+        taimux_core::status::of(pid)
+            .filter(|o| o.via == taimux_core::status::Via::MovedTo)
+            .map(|o| o.session_id)
     }
     fn version_of_pid(&self, pid: i32) -> Option<String> {
         version_of_pid(pid, &self.versions_dir)
@@ -1143,6 +1165,8 @@ mod plan_tests {
         hooks: HashMap<String, String>,
         /// pid -> what the session says it is doing, for the ones that say
         own: HashMap<i32, state::State>,
+        /// pid -> the background session its conversation was moved into
+        moved: HashMap<i32, String>,
         transcript: String,
         now: i64,
     }
@@ -1163,6 +1187,9 @@ mod plan_tests {
         }
         fn own_state(&self, pid: i32) -> Option<state::State> {
             self.own.get(&pid).copied()
+        }
+        fn moved_to(&self, pid: i32) -> Option<String> {
+            self.moved.get(&pid).cloned()
         }
         fn version_of_pid(&self, pid: i32) -> Option<String> {
             self.vers.get(&pid).cloned()
@@ -1205,6 +1232,7 @@ mod plan_tests {
             zooms: std::cell::Cell::new(0),
             hooks: HashMap::new(),
             own: HashMap::new(),
+            moved: HashMap::new(),
             transcript: r#"{"type":"user","timestamp":"2020-01-01T00:00:00Z"}"#.to_string(),
             now: 1788312225,
         }
@@ -1298,6 +1326,26 @@ mod plan_tests {
         e.hooks.insert("%1".into(), "run".into());
         e.own.insert(11, state::State::Idle);
         assert_eq!(plan_of(&e, &opts()).go.len(), 1);
+    }
+
+    /// A pane left behind by a backgrounding is idle, and restarting it would
+    /// resume the conversation it started on as a second branch, beside the
+    /// one agent view goes on running.
+    #[test]
+    fn a_pane_whose_conversation_moved_to_the_background_is_left_alone() {
+        let mut e = fake();
+        e.own.insert(11, state::State::Idle);
+        e.moved
+            .insert(11, "2447b564-7a96-4774-b70a-ef4b730bdd4d".into());
+        let mut o = opts();
+        o.include_busy = true; // not a busy-ness question at all
+        let p = plan_of(&e, &o);
+        assert!(p.go.is_empty());
+        assert!(
+            p.skipped[0].contains("moved to background session 2447b564: claude attach 2447b564"),
+            "{:?}",
+            p.skipped
+        );
     }
 
     /// Idle at its prompt, and still not restartable without asking: the shells
