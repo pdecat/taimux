@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/pdecat/taimux/compare/v0.21.0...v0.21.1) (2026-10-07)
+
+
+### Bug fixes
+
+* a restarting row holds its place in every list ([3732aec](https://github.com/pdecat/taimux/commit/3732aecd1566ef5684c85309fb6631bf2381cb2e))
+
 ## [0.21.0](https://github.com/pdecat/taimux/compare/v0.20.0...v0.21.0) (2026-10-03)
 
 
