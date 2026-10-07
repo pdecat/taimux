@@ -18,6 +18,7 @@ pub mod log;
 pub mod panes;
 pub mod paths;
 pub mod proc;
+pub mod restarting;
 pub mod sha256;
 pub mod sqlite;
 pub mod stat;

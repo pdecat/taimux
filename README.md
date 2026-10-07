@@ -701,6 +701,18 @@ auto-refresh, which is the real progress indicator. What happened is logged to
 print. Both keys are absent unless the picker was launched by the script, since
 it is the script that carries them out.
 
+A restarting row **holds its place**. Between the old session exiting and the new
+one starting, the pane runs a shell for about a second, and a scan in that gap
+finds no agent there, so the row used to drop out of the list and come back,
+moving every row under it up and down again. Now the restart writes the pane's
+row down before its first keystroke, under `$XDG_RUNTIME_DIR/taimux/restarting/`,
+and every scan lists that row in the pane's place, marked `↻`, until the new
+session is up or the attempt is over (40s at most, for a restart killed before it
+could clean up). It is the restart that holds the row rather than the picker, so
+this covers `Ctrl-x`, every row of an `F8` sweep, a `taimux restart` run from a
+shell and a picker opened mid-restart. Another host's picker listing this one
+keeps the row too, without the `↻`, which only this host can see.
+
 While either key runs, the command it started **owns the terminal**, and it is
 handed `/dev/tty` rather than the picker's stdout: the picker writes exactly one
 thing to stdout, the pane you chose, and a child inheriting it put its whole
@@ -1008,9 +1020,9 @@ process to put back), and never another agent (only claude publishes what it
 would take to relaunch it). One predicate answers both the colour and the list,
 so the two can never disagree.
 
-Left open, it **empties itself**: a row you press `Ctrl-x` on stays put, marked
-`↻`, until the session comes back on the installed version and drops out of the
-list. `F8` clears the whole of it in one go, after showing you the plan, a pane
+Left open, it **empties itself**: a row being restarted, by `Ctrl-x`, `F8` or
+`taimux restart`, stays put, marked `↻`, until the session comes back on the
+installed version and drops out of the list. `F8` clears the whole of it in one go, after showing you the plan, a pane
 [too short to be read](#a-pane-too-short-to-read) included.
 
 The stop is not in the cycle at all where nothing is installed to compare a

@@ -192,74 +192,121 @@ pub fn tmux_panes() -> Vec<Pane> {
 /// Only the title may be empty. Every other field carries a placeholder instead,
 /// because bash's `read` collapses runs of tabs and a blank field would silently
 /// shift every field after it.
+///
+/// A pane with a restart in flight is listed at the row it had when the restart
+/// began, whatever it is running meanwhile: see `restarting`.
 pub fn list_rows(
     prober: &mut crate::version::Prober,
     captures: &mut HashMap<String, String>,
 ) -> String {
     let fg = crate::proc::foreground_map();
+    compose(&tmux_panes(), &crate::restarting::held(), |pane| {
+        row_of(pane, &fg, prober, captures)
+    })
+}
+
+/// One pane's row, exactly as `list_rows` would list it, for a restart to hold
+/// the pane at. None for a pane that is not running an agent, or not there.
+pub fn list_row(id: &str) -> Option<String> {
+    let pane = tmux_panes().into_iter().find(|p| p.id == id)?;
+    row_of(
+        &pane,
+        &crate::proc::foreground_map(),
+        &mut crate::version::Prober::new(),
+        &mut HashMap::new(),
+    )
+}
+
+/// The list, in tmux's order, a held pane at its held row and every other one as
+/// `live` reads it.
+///
+/// The held row goes where the PANE is rather than where its row last was: the
+/// pane outlives the session it is restarting, so its place in tmux's list is
+/// its place in this one, and nothing has to remember an index.
+fn compose(
+    panes: &[Pane],
+    held: &HashMap<String, String>,
+    mut live: impl FnMut(&Pane) -> Option<String>,
+) -> String {
     let mut s = String::new();
-    for pane in tmux_panes() {
-        let Some(row) = agent_row(&pane, &fg) else {
-            continue;
+    for pane in panes {
+        let row = match held.get(&pane.id).filter(|r| !r.is_empty()) {
+            Some(r) => Some(r.clone()),
+            None => live(pane),
         };
-        let f: Vec<&str> = row.split('\t').collect();
-        let (id, target, cwd, agent) = (f[0], f[1], f[2], f[3]);
-        let pid: i32 = f[4].parse().unwrap_or(0);
-        let (argv, title) = (f[5], f[6]);
-
-        let screen = match captures.get(id) {
-            Some(c) => c.clone(),
-            None => {
-                let c = crate::tmux::capture(id).unwrap_or_default();
-                captures.insert(id.to_string(), c.clone());
-                c
-            }
-        };
-        let hook = crate::hook::current(id, pid);
-        // What the session says it is doing, which is the answer wherever there
-        // is one: see `state::reading`. Only claude publishes it.
-        let own = if agent == "claude" {
-            crate::status::of(pid)
-        } else {
-            None
-        };
-        let merged = crate::state::reading(
-            &screen,
-            own.as_ref().and_then(|o| o.state()),
-            hook.as_ref().map(|e| e.state.as_str()),
-        );
-        let last = hook
-            .as_ref()
-            .filter(|e| e.last > 0)
-            .map_or_else(|| "-".to_string(), |e| e.last.to_string());
-        let mode = hook.map(|e| e.mode).unwrap_or_else(|| "-".into());
-
-        let exe = std::fs::read_link(format!("/proc/{}/exe", pid))
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let exe = exe.trim_end_matches(" (deleted)"); // replaced by an update
-        let ver = if pid == 0 {
-            None
-        } else {
-            crate::version::from_path(exe, agent)
-                .or_else(|| crate::version::from_script(argv))
-                .or_else(|| prober.probe(exe, agent))
-        };
-
-        s.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
-            id,
-            target,
-            cwd,
-            agent,
-            ver.unwrap_or_default(),
-            merged.as_str(),
-            mode,
-            title,
-            last
-        ));
+        if let Some(r) = row {
+            s.push_str(&r);
+            s.push('\n');
+        }
     }
     s
+}
+
+/// The full row for one pane, without its line end, or None when it runs no
+/// agent.
+fn row_of(
+    pane: &Pane,
+    fg: &[Foreground],
+    prober: &mut crate::version::Prober,
+    captures: &mut HashMap<String, String>,
+) -> Option<String> {
+    let row = agent_row(pane, fg)?;
+    let f: Vec<&str> = row.split('\t').collect();
+    let (id, target, cwd, agent) = (f[0], f[1], f[2], f[3]);
+    let pid: i32 = f[4].parse().unwrap_or(0);
+    let (argv, title) = (f[5], f[6]);
+
+    let screen = match captures.get(id) {
+        Some(c) => c.clone(),
+        None => {
+            let c = crate::tmux::capture(id).unwrap_or_default();
+            captures.insert(id.to_string(), c.clone());
+            c
+        }
+    };
+    let hook = crate::hook::current(id, pid);
+    // What the session says it is doing, which is the answer wherever there
+    // is one: see `state::reading`. Only claude publishes it.
+    let own = if agent == "claude" {
+        crate::status::of(pid)
+    } else {
+        None
+    };
+    let merged = crate::state::reading(
+        &screen,
+        own.as_ref().and_then(|o| o.state()),
+        hook.as_ref().map(|e| e.state.as_str()),
+    );
+    let last = hook
+        .as_ref()
+        .filter(|e| e.last > 0)
+        .map_or_else(|| "-".to_string(), |e| e.last.to_string());
+    let mode = hook.map(|e| e.mode).unwrap_or_else(|| "-".into());
+
+    let exe = std::fs::read_link(format!("/proc/{}/exe", pid))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let exe = exe.trim_end_matches(" (deleted)"); // replaced by an update
+    let ver = if pid == 0 {
+        None
+    } else {
+        crate::version::from_path(exe, agent)
+            .or_else(|| crate::version::from_script(argv))
+            .or_else(|| prober.probe(exe, agent))
+    };
+
+    Some(format!(
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        id,
+        target,
+        cwd,
+        agent,
+        ver.unwrap_or_default(),
+        merged.as_str(),
+        mode,
+        title,
+        last
+    ))
 }
 
 /// The rows as `taimux list` prints them: the eight fields every taimux reads,
@@ -463,5 +510,51 @@ mod tests {
         assert_eq!(wire(rows, true), rows);
         // rows already in the old shape go through untouched
         assert_eq!(wire(&plain, false), plain);
+    }
+
+    fn live(p: &Pane) -> Option<String> {
+        (p.comm == "claude").then(|| format!("{}\tlive", p.id))
+    }
+
+    /// The restart this is for: the pane is running a shell for a second, so a
+    /// live read has no row for it, and the held one goes where the pane is.
+    #[test]
+    fn a_pane_held_through_a_restart_keeps_its_place_with_no_agent_in_it() {
+        let panes = [
+            pane("pts/1", "%1", "claude", ""),
+            pane("pts/2", "%2", "bash", ""),
+            pane("pts/3", "%3", "claude", ""),
+        ];
+        let held = HashMap::from([("%2".to_string(), "%2\theld".to_string())]);
+        assert_eq!(
+            compose(&panes, &held, live),
+            "%1\tlive\n%2\theld\n%3\tlive\n"
+        );
+        assert_eq!(
+            compose(&panes, &HashMap::new(), live),
+            "%1\tlive\n%3\tlive\n"
+        );
+    }
+
+    /// Either side of that second the old session, or the new one, is still in
+    /// the pane, and it is still the held row that is listed: the old one is
+    /// blanking its title on the way out and the new one has not set it yet.
+    #[test]
+    fn a_held_row_stands_in_for_whatever_the_pane_is_running() {
+        let panes = [pane("pts/1", "%1", "claude", "")];
+        let held = HashMap::from([("%1".to_string(), "%1\theld".to_string())]);
+        assert_eq!(compose(&panes, &held, live), "%1\theld\n");
+    }
+
+    /// A pane marked with no row to hold it at is listed as it is, and a hold for
+    /// a pane that has gone altogether lists nothing.
+    #[test]
+    fn a_hold_with_no_row_or_no_pane_changes_nothing() {
+        let panes = [pane("pts/1", "%1", "claude", "")];
+        let held = HashMap::from([
+            ("%1".to_string(), String::new()),
+            ("%9".to_string(), "%9\theld".to_string()),
+        ]);
+        assert_eq!(compose(&panes, &held, live), "%1\tlive\n");
     }
 }

@@ -201,6 +201,11 @@ pub struct Source {
     /// for the 85 seconds its restarts took, with no key accepted and nothing
     /// on screen to say why.
     pub fetch: Arc<dyn Fn() -> String + Send + Sync>,
+    /// The panes with a restart in flight, for the marker column, asked on the
+    /// same thread and just before `fetch`. The rows already come back held at
+    /// what they were (see `restarting` in core), so this only says WHICH rows
+    /// are held, which nothing in a row can.
+    pub restarting: Arc<dyn Fn() -> HashSet<String> + Send + Sync>,
     /// The ended list stays synchronous: it is a read of one cache file, with no
     /// fork in it, and it is what Tab's last stop shows the instant you land on
     /// it. Nothing here has ever been slow, and making it async would mean
@@ -826,34 +831,22 @@ struct App {
     pending_since: Instant,
     /// The client as of the last refresh, for the resize check.
     client: Option<(String, (u16, u16))>,
-    /// Panes with a restart in flight: when it was fired, the row the pane had
-    /// at the time, and where that row sat in the list.
+    /// Panes with a restart in flight, as of the last refresh.
     ///
-    /// A restart is detached and takes seconds: it asks the session to exit,
-    /// waits, and starts a new one. For that whole window the pane has no agent
-    /// in its foreground group, so the scan does not see it and the row simply
-    /// VANISHES from under the cursor, which then falls back to the top of the
-    /// list. You press ctrl-x on a session and lose both the row and your place.
-    /// So the row is held: reinserted where it was, with the marker column saying
-    /// what is happening, until the session comes back or the hold runs out.
-    /// …and whether the pane has been observed GONE yet, which is what makes
-    /// "it is in the scan again" mean the session came back rather than the
-    /// restart not having happened yet.
-    restarting: HashMap<String, (Instant, String, usize, bool)>,
+    /// Only the marker column reads it. Holding the ROW is the scan's job: a
+    /// restart takes the session away for a second or so, and the pane used to
+    /// drop out of the list for it and come back, with every row below it
+    /// moving up and down again. This picker held the one row ctrl-x was
+    /// pressed on, from what it had on screen, and nothing else held anything:
+    /// an F8 sweep blinked out every row it touched. The restart now writes the
+    /// row down itself and the scan lists it from there, for every list.
+    restarting: HashSet<String>,
     /// How many live sessions the query matches, while the past list is on
     /// screen and matches none: what its empty note points at. Counted when the
     /// query is applied rather than when the note is drawn, since a draw runs on
     /// every tick and this lays out the live rows and reads their index files.
     live_hits: usize,
 }
-
-/// How long a restarting row is held.
-///
-/// `restart` waits up to 12s for a session to exit and then polls up to 20s for
-/// it to come back, so anything shorter than that drops the row exactly when its
-/// owner is watching to see whether it worked. The hold is a backstop, not the
-/// normal path: a row stops being held the moment the pane is scanned again.
-const RESTART_HOLD: Duration = Duration::from_secs(40);
 
 impl App {
     /// The preview for the row under the cursor, in two parts: a header saying
@@ -1073,6 +1066,7 @@ fn tail(screen: &str, room: usize) -> Vec<Line<'static>> {
 /// went on.
 struct Refresh {
     tsv: String,
+    restarting: HashSet<String>,
     took: Duration,
     /// Empty unless something forked; see `stat`.
     spent: String,
@@ -1233,8 +1227,8 @@ impl App {
         if self.mode == Mode::Dead {
             self.past = self.src.ended.as_ref().map(|f| f()).unwrap_or_default();
         } else {
+            self.restarting = (self.src.restarting)();
             self.tsv = (self.src.fetch)();
-            self.hold_restarting();
         }
     }
 
@@ -1254,14 +1248,20 @@ impl App {
             return;
         }
         let f = self.src.fetch.clone();
+        let held = self.src.restarting.clone();
         let watch = self.src.popup;
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             taimux_core::stat::reset();
             let at = Instant::now();
+            // Before the scan, not after. A restart that ends between the two
+            // leaves the session's new row marked for one refresh; the other
+            // way round, a row the scan held could come back unmarked.
+            let restarting = held();
             let tsv = f();
             let _ = tx.send(Refresh {
                 tsv,
+                restarting,
                 took: at.elapsed(),
                 spent: taimux_core::stat::report(),
                 client: watch.then(own_client).flatten(),
@@ -1291,7 +1291,7 @@ impl App {
                 // Pane rows, whichever list is on screen. One that lands under
                 // the past list goes where it belongs and waits for the Tab back.
                 self.tsv = r.tsv;
-                self.hold_restarting();
+                self.restarting = r.restarting;
                 self.pending = None;
                 true
             }
@@ -1309,90 +1309,6 @@ impl App {
     /// healthy machine, where the answer is back before the next draw.
     fn refreshing(&self) -> bool {
         self.pending.is_some() && self.pending_since.elapsed() > Duration::from_secs(1)
-    }
-
-    /// Put back the rows of panes whose restart is still in flight.
-    ///
-    /// Reinserted at the index each one had rather than appended, because the
-    /// list is otherwise unchanged and appending would move the row to the bottom
-    /// just as its owner is watching it. Holding stops as soon as the pane is
-    /// scanned again, which is the session coming back, or after RESTART_HOLD,
-    /// which is the restart having failed. Either way the row stops lying.
-    fn hold_restarting(&mut self) {
-        if self.restarting.is_empty() {
-            return;
-        }
-        let present: HashSet<String> = self
-            .tsv
-            .lines()
-            .filter_map(|l| l.split('\t').next())
-            .map(str::to_string)
-            .collect();
-        let now = Instant::now();
-        self.restarting.retain(|id, (at, _, _, seen_gone)| {
-            // The timeout is the backstop either way: a restart that never
-            // took effect must not hold a row for ever.
-            if now.duration_since(*at) >= RESTART_HOLD {
-                return false;
-            }
-            if present.contains(id) {
-                // Being in the scan only means "the session came back" if it
-                // was ever seen to LEAVE. Before that it means the restart has
-                // simply not taken effect yet, and treating the two the same is
-                // what dropped the hold on the very first refresh after ctrl-x:
-                // the agent had not exited yet, so the row was released, and
-                // when it did exit a moment later there was nothing holding it.
-                // The row vanished from under the cursor, which fell to the top.
-                !*seen_gone
-            } else {
-                *seen_gone = true;
-                true
-            }
-        });
-        if self.restarting.is_empty() {
-            return;
-        }
-        // Ascending, so each index still means the position it meant when the
-        // row was taken out.
-        // Only the ones actually MISSING are put back. An entry still held
-        // because its pane has not gone yet is already in the list, and
-        // reinserting it would show the row twice.
-        let mut held: Vec<(usize, String)> = self
-            .restarting
-            .iter()
-            .filter(|(id, _)| !present.contains(*id))
-            .map(|(_, (_, line, idx, _))| (*idx, line.clone()))
-            .collect();
-        held.sort_by_key(|(idx, _)| *idx);
-        let mut lines: Vec<String> = self.tsv.lines().map(str::to_string).collect();
-        for (idx, line) in held {
-            let at = idx.min(lines.len());
-            lines.insert(at, line);
-        }
-        self.tsv = lines.join("\n");
-        self.tsv.push('\n');
-    }
-
-    /// Start holding a pane's row, before the restart takes its session away.
-    ///
-    /// Called BEFORE the restart is fired, because afterwards the row it needs to
-    /// remember may already be gone.
-    ///
-    /// Only ever a PANE row. ctrl-x on a past row explains itself and restarts
-    /// nothing, and holding one anyway painted it ↻ and, after a Tab to a live
-    /// list, put it back among the panes for as long as the hold lasted.
-    fn hold(&mut self, id: &str) {
-        if let Some((idx, line)) = self
-            .tsv
-            .lines()
-            .enumerate()
-            .find(|(_, l)| l.split('\t').next() == Some(id))
-        {
-            self.restarting.insert(
-                id.to_string(),
-                (Instant::now(), line.to_string(), idx, false),
-            );
-        }
     }
 
     /// The snippets the query earns in `mode`'s list, or none.
@@ -1488,7 +1404,7 @@ impl App {
                 // turn boundary, so one restored by tmux-resurrect and not
                 // prompted since has nothing there.
                 ptitles: index::pane_titles(),
-                restarting: self.restarting.keys().cloned().collect(),
+                restarting: self.restarting.clone(),
             },
         )
     }
@@ -1701,7 +1617,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
         pending: None,
         pending_since: Instant::now(),
         client: None,
-        restarting: HashMap::new(),
+        restarting: HashSet::new(),
         live_hits: 0,
         src,
     };
@@ -2126,10 +2042,10 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
                     KeyCode::Char('x') if ctrl => {
                         if let (Some(s), Some(r)) = (app.src.script.clone(), app.selected()) {
                             let id = r.pane_id.clone();
-                            // Held BEFORE the restart is fired. By the time it
-                            // returns the session may already be gone, and with
-                            // it the row this needs to remember.
-                            app.hold(&id);
+                            // Nothing to hold here: the restart writes the row
+                            // down before its first keystroke and every scan
+                            // lists it from there until the session is back,
+                            // marked ↻. See `restarting` in core.
                             guard.suspend();
                             if let Err(e) = act_child(&s, &["_restart", &id]) {
                                 crate::act::report_failed_child("the restart", &e);
@@ -2144,13 +2060,10 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
                             // long as the scan took.
                             app.rebuild();
                             app.start_refresh();
-                            // …and the cursor goes back on it explicitly. The
-                            // rebuild re-pins by pane id on its own, but only
-                            // when the row is in the list: a restart that was
-                            // REFUSED (working, holding a dialog, unresolvable)
-                            // holds nothing, so without this the cursor would
-                            // still fall to the top on exactly the presses that
-                            // did nothing.
+                            // …and the cursor goes back on it explicitly, which
+                            // the rebuild only does when it can re-pin the row
+                            // it was on, so a press that did nothing never
+                            // leaves the cursor somewhere else.
                             app.focus(&id);
                         }
                     }
@@ -2236,6 +2149,7 @@ mod tests {
         let t = tsv.to_string();
         Source {
             fetch: Arc::new(move || t.clone()),
+            restarting: Arc::new(HashSet::new),
             ended: None,
             cur: String::new(),
             cur_cwd: String::new(),
@@ -2270,54 +2184,7 @@ mod tests {
             pending: None,
             pending_since: Instant::now(),
             client: None,
-            restarting: HashMap::new(),
-            live_hits: 0,
-        };
-        a.fetch();
-        a.rebuild();
-        a
-    }
-
-    /// An app whose scan can be changed under it, which is what a restart does:
-    /// the pane is there, then it is not, then it is back.
-    ///
-    /// Arc/Mutex rather than Rc/RefCell because the row source is handed to a
-    /// worker thread now, so it has to be Send and Sync like the real ones.
-    fn app_live(cell: Arc<std::sync::Mutex<String>>) -> App {
-        let c = cell.clone();
-        let mut a = App {
-            src: Source {
-                fetch: Arc::new(move || c.lock().unwrap().clone()),
-                ended: None,
-                cur: String::new(),
-                cur_cwd: String::new(),
-                cur_target: String::new(),
-                home: "/h".into(),
-                newver: String::new(),
-                script: None,
-                popup: false,
-                state: Default::default(),
-            },
-            matcher: SkimMatcherV2::default().ignore_case(),
-            mode: Mode::All,
-            search: false,
-            search_past: false,
-            by_date: false,
-            preview: true,
-            query: String::new(),
-            width: 100,
-            tsv: String::new(),
-            past: String::new(),
-            all: Vec::new(),
-            view: Vec::new(),
-            sel: 0,
-            shot: None,
-            poff: 0,
-            poff_for: String::new(),
-            pending: None,
-            pending_since: Instant::now(),
-            client: None,
-            restarting: HashMap::new(),
+            restarting: HashSet::new(),
             live_hits: 0,
         };
         a.fetch();
@@ -2329,181 +2196,57 @@ mod tests {
         a.view.iter().map(|&i| a.all[i].pane_id.clone()).collect()
     }
 
-    /// The bug this is all for: a restart takes the session away for seconds, so
-    /// the pane has no agent, the scan does not see it, and the row disappears
-    /// from under the cursor.
-    #[test]
-    fn a_restarting_row_stays_in_the_list_where_it_was() {
-        let cell = Arc::new(std::sync::Mutex::new(THREE.to_string()));
-        let mut a = app_live(cell.clone());
-        a.sel = 1; // the middle one, %2
-        assert_eq!(ids(&a), ["%1", "%2", "%3"]);
-
-        a.hold("%2");
-        // the restart has taken it away
-        *cell.lock().unwrap() = "%1\ta:1.1\t/h\tclaude\t1\tidle\t-\tapple pie\n\
-                              %3\tc:1.1\t/h\tclaude\t1\tinput\t-\tcherry tart"
-            .to_string();
-        a.fetch();
-        a.rebuild();
-
-        assert_eq!(ids(&a), ["%1", "%2", "%3"], "the row should still be there");
-        assert_eq!(
-            a.selected().map(|r| r.pane_id.as_str()),
-            Some("%2"),
-            "and the cursor should still be on it"
-        );
-    }
-
-    /// The same, but through the sequence ctrl-x actually produces.
-    ///
-    /// The test above jumps straight to "the restart has taken it away", and
-    /// that is the step the bug was hiding behind. A restart is fired and
-    /// returns AT ONCE, so the first refresh after ctrl-x still sees the agent:
-    /// it has been asked to exit and has not done so yet. Releasing the hold on
-    /// that refresh meant nothing was holding the row when the session did go a
-    /// moment later, and the cursor fell to the top of the list while its owner
-    /// was watching the session they had just asked to upgrade.
-    #[test]
-    fn a_row_is_still_held_through_the_refresh_before_the_session_goes() {
-        let cell = Arc::new(std::sync::Mutex::new(THREE.to_string()));
-        let mut a = app_live(cell.clone());
-        a.sel = 1;
-        a.hold("%2");
-
-        // Refresh ONE: the restart is in flight and the agent is still there.
-        a.fetch();
-        a.rebuild();
-        assert_eq!(
-            ids(&a),
-            ["%1", "%2", "%3"],
-            "no duplicate while it is present"
-        );
-        assert!(
-            a.restarting.contains_key("%2"),
-            "not yet gone, so still held"
-        );
-        assert_eq!(
-            a.selected().map(|r| r.pane_id.as_str()),
-            Some("%2"),
-            "cursor stays put"
-        );
-
-        // Refresh TWO: now the session has actually gone.
-        *cell.lock().unwrap() = "%1\ta:1.1\t/h\tclaude\t1\tidle\t-\tapple pie\n\
-                              %3\tc:1.1\t/h\tclaude\t1\tinput\t-\tcherry tart"
-            .to_string();
-        a.fetch();
-        a.rebuild();
-        assert_eq!(
-            ids(&a),
-            ["%1", "%2", "%3"],
-            "held in place while it is away"
-        );
-        assert_eq!(
-            a.selected().map(|r| r.pane_id.as_str()),
-            Some("%2"),
-            "and the cursor is STILL on the session being upgraded"
-        );
-
-        // Refresh THREE: it comes back, and only now is the hold spent.
-        *cell.lock().unwrap() = THREE.to_string();
-        a.fetch();
-        a.rebuild();
-        assert!(a.restarting.is_empty(), "back for real, so no longer held");
-        assert_eq!(ids(&a), ["%1", "%2", "%3"]);
-        assert_eq!(a.selected().map(|r| r.pane_id.as_str()), Some("%2"));
-    }
-
-    /// Appending would have been easier and wrong: the row would jump to the
-    /// bottom of the list at the moment its owner is watching it.
-    #[test]
-    fn a_held_row_is_not_moved_to_the_end() {
-        let cell = Arc::new(std::sync::Mutex::new(THREE.to_string()));
-        let mut a = app_live(cell.clone());
-        a.hold("%1");
-        *cell.lock().unwrap() = "%2\tb:1.1\t/h\tclaude\t1\trun\t-\tbanana bread\n\
-                              %3\tc:1.1\t/h\tclaude\t1\tinput\t-\tcherry tart"
-            .to_string();
-        a.fetch();
-        a.rebuild();
-        assert_eq!(ids(&a), ["%1", "%2", "%3"], "%1 was first and stays first");
-    }
-
-    /// Holding stops the moment the session is back, or the row would go on
-    /// claiming a restart is in flight for as long as the picker is open.
-    #[test]
-    fn the_hold_is_released_when_the_session_comes_back() {
-        let cell = Arc::new(std::sync::Mutex::new(THREE.to_string()));
-        let mut a = app_live(cell.clone());
-        a.hold("%2");
-        *cell.lock().unwrap() = "%1\ta:1.1\t/h\tclaude\t1\tidle\t-\tapple pie".to_string();
-        a.fetch();
-        assert!(a.restarting.contains_key("%2"), "still away, still held");
-        // back, with a new title, which is what a fresh session looks like
-        *cell.lock().unwrap() = THREE.to_string();
-        a.fetch();
-        a.rebuild();
-        assert!(a.restarting.is_empty(), "back, so no longer held");
-        assert_eq!(ids(&a), ["%1", "%2", "%3"]);
-    }
-
-    /// A restart that never comes back must not leave a row lying about forever.
-    #[test]
-    fn the_hold_expires() {
-        let cell = Arc::new(std::sync::Mutex::new(THREE.to_string()));
-        let mut a = app_live(cell.clone());
-        a.hold("%2");
-        // fired longer ago than the hold allows
-        if let Some(e) = a.restarting.get_mut("%2") {
-            e.0 = Instant::now() - RESTART_HOLD - Duration::from_secs(1);
-        }
-        *cell.lock().unwrap() = "%1\ta:1.1\t/h\tclaude\t1\tidle\t-\tapple pie".to_string();
-        a.fetch();
-        a.rebuild();
-        assert!(a.restarting.is_empty());
-        assert_eq!(
-            ids(&a),
-            ["%1"],
-            "the row is gone, because the restart failed"
-        );
-    }
-
     /// The marker column says a restart is in flight. It goes there and not into
     /// the summary because the summary strips a leading marker glyph.
+    ///
+    /// The row itself is the scan's: a restart writes it down before its first
+    /// keystroke and the scan lists it from there (see `restarting` in core), so
+    /// all the picker adds is which rows those are.
     #[test]
-    fn a_held_row_is_marked_as_restarting() {
-        let cell = Arc::new(std::sync::Mutex::new(THREE.to_string()));
-        let mut a = app_live(cell.clone());
-        a.hold("%2");
-        *cell.lock().unwrap() = "%1\ta:1.1\t/h\tclaude\t1\tidle\t-\tapple pie".to_string();
+    fn a_row_with_a_restart_in_flight_is_marked() {
+        let mut a = app(THREE);
+        a.src.restarting = Arc::new(|| HashSet::from(["%2".to_string()]));
         a.fetch();
         a.rebuild();
-        let row = a.all.iter().find(|r| r.pane_id == "%2").unwrap();
-        let text = row.to_ansi();
+        let text = |id: &str| a.all.iter().find(|r| r.pane_id == id).unwrap().to_ansi();
         assert!(
-            text.contains('↻'),
-            "expected the restart marker in {text:?}"
+            text("%2").contains('↻'),
+            "expected the restart marker in {:?}",
+            text("%2")
         );
         // …and it does not borrow the waiting star, which means something else
-        assert!(!text.contains('✳'), "must not read as asking: {text:?}");
+        assert!(!text("%2").contains('✳'), "must not read as asking");
+        assert!(!text("%1").contains('↻'), "only the row being restarted");
     }
 
-    /// A row held while a filter is on keeps its state, so it stays in whichever
-    /// mode was being watched. A synthetic state would have dropped it out of the
-    /// list at exactly the wrong moment.
+    /// The mark comes and goes with the scan it was read beside, on the worker
+    /// thread every refresh but the first runs on, so it is gone the moment the
+    /// restart is over rather than lingering on a session already back.
     #[test]
-    fn a_held_row_survives_the_mode_it_was_watched_in() {
-        let cell = Arc::new(std::sync::Mutex::new(THREE.to_string()));
-        let mut a = app_live(cell.clone());
-        a.mode = Mode::Run; // %2 is the running one
-        a.rebuild();
-        assert_eq!(ids(&a), ["%2"]);
-        a.hold("%2");
-        *cell.lock().unwrap() = "%1\ta:1.1\t/h\tclaude\t1\tidle\t-\tapple pie".to_string();
-        a.fetch();
-        a.rebuild();
-        assert_eq!(ids(&a), ["%2"], "still listed under the filter it was in");
+    fn the_mark_rides_each_refresh_and_goes_with_the_restart() {
+        let held = Arc::new(std::sync::Mutex::new(HashSet::from(["%2".to_string()])));
+        let mut a = app(THREE);
+        let h = held.clone();
+        a.src.restarting = Arc::new(move || h.lock().unwrap().clone());
+        let refresh = |a: &mut App| {
+            a.start_refresh();
+            for _ in 0..100 {
+                if a.take_refresh() {
+                    a.rebuild();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            panic!("the refresh never arrived");
+        };
+        let marked = |a: &App| a.all.iter().any(|r| r.to_ansi().contains('↻'));
+
+        refresh(&mut a);
+        assert!(marked(&a), "in flight");
+        held.lock().unwrap().clear();
+        refresh(&mut a);
+        assert!(!marked(&a), "over");
+        assert_eq!(ids(&a), ["%1", "%2", "%3"]);
     }
 
     /// The bug this is all for: the picker used to call the row source from its
@@ -3256,15 +2999,6 @@ mod tests {
         assert!(a.searching(), "ctrl-t on a live list again");
         a.step_mode(true);
         assert!(!a.searching(), "…leaves the past list off, as it was left");
-    }
-
-    /// ctrl-x on a past row restarts nothing, so it holds nothing either. Held,
-    /// it was painted ↻, and a Tab to a live list put it among the panes.
-    #[test]
-    fn ctrl_x_on_a_past_row_holds_nothing() {
-        let mut a = app_past("");
-        a.hold("dead:claude:/o.jsonl");
-        assert!(a.restarting.is_empty());
     }
 
     /// The first scan places the cursor by the pane the picker was opened from,

@@ -290,6 +290,10 @@ fn restart_main(o: &taimux_cli::restart::Opts, go: bool, ask: bool) -> i32 {
     for g in &plan.go {
         print!("restarting {} ({}) ... ", g.pane, g.target);
         let _ = std::io::stdout().flush();
+        // Until this pass of the loop ends, whichever way it ends, every list
+        // shows the pane at the row it has now rather than dropping it while it
+        // runs a shell. See `restarting`.
+        let _held = taimux_core::restarting::Held::begin(&g.pane);
         if !taimux_cli::restart::restart_pane(&g.pane, g.pid, &g.cmd) {
             println!("did not exit, left alone");
             bad += 1;
@@ -507,6 +511,7 @@ fn pick() -> i32 {
             });
             taimux_cli::remote::all_panes(&local, &taimux_cli::remote::tmux_pane_ttys())
         }),
+        restarting: std::sync::Arc::new(|| taimux_core::restarting::held().into_keys().collect()),
         ended: taimux_cli::tui::ended_source(),
         cur: cur.clone(),
         // The LOCAL pane's, even when `cur` has just been resolved to a pane on
@@ -1000,6 +1005,9 @@ fn main() {
                         let mut c = HashMap::new();
                         taimux_core::panes::list_rows(&mut p, &mut c)
                     })
+                }),
+                restarting: std::sync::Arc::new(|| {
+                    taimux_core::restarting::held().into_keys().collect()
                 }),
                 ended: taimux_cli::tui::ended_source(),
                 cur: std::env::args().nth(2).unwrap_or_default(),
