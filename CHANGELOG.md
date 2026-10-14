@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/pdecat/taimux/compare/v0.21.2...v0.22.0) (2026-10-14)
+
+
+### Features
+
+* Tab stops on the sessions running background work ([05ec85c](https://github.com/pdecat/taimux/commit/05ec85cf2d125595d4099a243f052247aaa38b34))
+
 ## [0.21.2](https://github.com/pdecat/taimux/compare/v0.21.1...v0.21.2) (2026-10-14)
 
 
