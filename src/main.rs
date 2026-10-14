@@ -736,8 +736,9 @@ fn state_report(id: &str) -> i32 {
         }
     };
     println!("pane        {}, {} pid {}", id, agent, pid);
+    let screen = taimux_core::tmux::capture(id).unwrap_or_default();
     // First, since it is the answer wherever there is one: `state::reading`.
-    let own = taimux_core::status::of(pid);
+    let own = taimux_core::status::of(pid, &|| screen.clone());
     match &own {
         Some(o) => println!(
             "claude says {}{}, {}, conversation {}, from {}",
@@ -764,6 +765,22 @@ fn state_report(id: &str) -> i32 {
             }
         ),
         None => {}
+    }
+    // A session another process runs is on THAT process's version, and so is
+    // its row, whatever this pane's own process runs.
+    if let Some(o) = own.as_ref().filter(|o| o.via.elsewhere()) {
+        let argv = conv::argv_of(o.pid).join(" ");
+        let ver = taimux_core::panes::running(o.pid, agent, &argv, &mut Default::default());
+        println!(
+            "version     {}, of pid {} running background session {}, not this pane's process",
+            ver.as_deref().unwrap_or("unknown"),
+            o.pid,
+            if o.job.is_empty() {
+                o.session_id.get(..8).unwrap_or(&o.session_id)
+            } else {
+                &o.job
+            }
+        );
     }
     let raw = hook::hook_entry(id, pid);
     match &raw {
@@ -809,7 +826,6 @@ fn state_report(id: &str) -> i32 {
         Some(t) => println!("last said   {}", ago(t)),
         None => println!("last said   not known without a hook line from this process"),
     }
-    let screen = taimux_core::tmux::capture(id).unwrap_or_default();
     let lines: Vec<&str> = screen.lines().collect();
     println!(
         "screen      {}: {}, {}",

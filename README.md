@@ -222,11 +222,20 @@ does:
   for the process holding that pid now.
 - **A background session is followed.** A pane running `claude attach <id>`
   holds no session of its own: it shows one that agent view's supervisor runs
-  under another pid, and that session's file is the one read. The same goes for a
+  under another pid, and that session's file is the one read, found by its job id
+  or its session id (a job that resumed a conversation runs under that
+  conversation's id). Since 2.1.299 the attach client writes a file of its own
+  too, with no status in it, and the attach wins over it. The same goes for a
   pane whose conversation was backgrounded from under it, which Claude Code
   2.1.286 left behind as a client: its own file stops at whatever it said at that
   moment (one read `busy` for 41 hours at an idle prompt), and its transcript
-  ends with a `continued-in` record naming the session it went to.
+  ends with a `continued-in` record naming the session it went to. That pane is
+  agent view's client from then on, and `←` can attach it to any other
+  background session, which nothing on disk records. The screen does: the name
+  Claude Code draws on the rule above the prompt box is that of the session
+  shown, and a running background session of that name is the one read. A name
+  Claude Code derived itself (`renovate-90`) is not drawn, so a pane showing one
+  of those is read as showing where its conversation went.
 - **An unfamiliar file is asked about the documented way.** The file is not an
   interface Claude Code documents; `claude agents --json` is, and reads the same
   store. So a file this does not recognise, one with no `status` in it, is looked
@@ -456,6 +465,14 @@ showing it. It is read off the live process, cheapest source first:
    and keyed by the binary's path and mtime, since the picker rebuilds the list
    every second.
 
+A pane showing a [background session](#in-claude-codes-own-words) is a client
+of it, and the process read is the one running that session, the worker under
+agent view's supervisor, rather than the client in the pane. The two routinely
+differ: the client is usually started on the latest release to attach, while the
+worker stays on whatever it started on, and only the worker's version says
+whether the conversation runs outdated code. `taimux state <pane>` prints that
+process and its version on a line of its own.
+
 When none of them can tell, nothing is shown rather than a version the pane may
 not be running. Sources 1 and 3 read `/proc`, so on a system without it only
 source 2 can answer. `TAIMUX_VERSIONS=0` turns the whole thing off, and with it
@@ -654,8 +671,9 @@ running code a self-update has already replaced. `Tab` gathers those rows into a
 [list of their own](#sessions-running-outdated-code), so they can be dealt with
 without hunting for the yellow. They inherit every refusal the
 command makes on its own, so a pane that is working, holding a permission dialog,
-already current, running another agent, or whose conversation cannot be
-identified is left alone. A mistyped chord is a no-op, not a lost turn.
+already current, running another agent, attached to a background session, or
+whose conversation cannot be identified is left alone. A mistyped chord is a
+no-op, not a lost turn.
 
 `Ctrl-x` restarts the highlighted row straight away when it can. When it **can't**,
 it says why and offers to force it, because a silently declined keypress is
@@ -1471,6 +1489,14 @@ state <pane>` says so on a line of its own, since the list shows such a pane idl
 The dialog check is **never** skipped, `--include-busy` or not: an `Enter` sent to
 a pane showing a permission prompt picks its highlighted option and approves a
 tool call nobody approved.
+
+A pane showing a [background session](#in-claude-codes-own-words) is judged by
+the version of the worker running it, as its row is, and is **never** restarted,
+however far behind that worker is: retyping the pane would resume the transcript
+the pane started on, branching a conversation that carries on in the worker. The
+plan names the session instead. Agent view's supervisor does restart a worker
+that has fallen behind, but only one with nothing attached to it (2.1.299's
+`respawnIfIdleStale`), so it never happens while the pane stays attached.
 
 ### A pane too short to read
 

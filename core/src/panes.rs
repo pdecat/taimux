@@ -242,6 +242,23 @@ fn compose(
     s
 }
 
+/// The version the process `pid` is running, read off the process itself,
+/// cheapest source first: see `version`.
+pub fn running(
+    pid: i32,
+    agent: &str,
+    argv: &str,
+    prober: &mut crate::version::Prober,
+) -> Option<String> {
+    let exe = std::fs::read_link(format!("/proc/{}/exe", pid))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let exe = exe.trim_end_matches(" (deleted)"); // replaced by an update
+    crate::version::from_path(exe, agent)
+        .or_else(|| crate::version::from_script(argv))
+        .or_else(|| prober.probe(exe, agent))
+}
+
 /// The full row for one pane, without its line end, or None when it runs no
 /// agent.
 fn row_of(
@@ -268,7 +285,7 @@ fn row_of(
     // What the session says it is doing, which is the answer wherever there
     // is one: see `state::reading`. Only claude publishes it.
     let own = if agent == "claude" {
-        crate::status::of(pid)
+        crate::status::of(pid, &|| screen.clone())
     } else {
         None
     };
@@ -283,16 +300,17 @@ fn row_of(
         .map_or_else(|| "-".to_string(), |e| e.last.to_string());
     let mode = hook.map(|e| e.mode).unwrap_or_else(|| "-".into());
 
-    let exe = std::fs::read_link(format!("/proc/{}/exe", pid))
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let exe = exe.trim_end_matches(" (deleted)"); // replaced by an update
-    let ver = if pid == 0 {
-        None
-    } else {
-        crate::version::from_path(exe, agent)
-            .or_else(|| crate::version::from_script(argv))
-            .or_else(|| prober.probe(exe, agent))
+    // The version of the process running the session the pane SHOWS, which is
+    // not the pane's own process when that is only agent view's client: an
+    // attached session runs on whatever release its worker started on, while
+    // the client is usually newer, having been started to attach.
+    let ver = match own.as_ref().filter(|o| o.via.elsewhere() && o.pid > 0) {
+        Some(o) => {
+            let argv = crate::conv::argv_of(o.pid).join(" ");
+            running(o.pid, agent, &argv, prober)
+        }
+        None if pid == 0 => None,
+        None => running(pid, agent, argv, prober),
     };
 
     Some(format!(
@@ -338,7 +356,7 @@ pub fn state_of(id: &str, pid: i32) -> crate::state::State {
     let hook = crate::hook::current(id, pid);
     crate::state::reading(
         &screen,
-        crate::status::of(pid).and_then(|o| o.state()),
+        crate::status::of(pid, &|| screen.clone()).and_then(|o| o.state()),
         hook.as_ref().map(|e| e.state.as_str()),
     )
 }

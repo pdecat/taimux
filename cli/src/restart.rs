@@ -339,12 +339,12 @@ pub trait Env {
     /// What the session says it is doing, Claude Code's own status
     /// (`status::of`), which outranks the hook line wherever there is one.
     /// `None` by default, and for every fixture that predates it.
-    fn own_state(&self, _pid: i32) -> Option<state::State> {
+    fn own_state(&self, _pid: i32, _screen: &str) -> Option<state::State> {
         None
     }
-    /// The background session this pane's conversation was moved into, when a
-    /// backgrounding left the pane's process behind as its client.
-    fn moved_to(&self, _pid: i32) -> Option<String> {
+    /// The background session this pane shows when another process runs it:
+    /// an attach, or a pane whose conversation was moved into the background.
+    fn elsewhere(&self, _pane: &str, _pid: i32) -> Option<Elsewhere> {
         None
     }
     fn version_of_pid(&self, pid: i32) -> Option<String>;
@@ -353,6 +353,19 @@ pub trait Env {
     fn resolve(&self, pane: &str, cwd: &str, title: &str, pid: i32) -> Result<String, String>;
     fn read_transcript(&self, path: &str) -> Option<String>;
     fn now(&self) -> i64;
+}
+
+/// A session a pane shows while agent view's supervisor runs it, under
+/// another pid: see `status::Via::elsewhere`.
+pub struct Elsewhere {
+    /// The id `claude attach` takes.
+    pub id: String,
+    /// The process running it.
+    pub pid: i32,
+    /// The version that process runs, which is the one the row shows.
+    pub version: Option<String>,
+    /// Whether it is the pane's own conversation, moved there.
+    pub moved: bool,
 }
 
 /// Decide what to restart, and say why for everything else.
@@ -400,6 +413,33 @@ pub fn plan(
         if !o.only_panes.is_empty() && !o.only_panes.iter().any(|w| w == id) {
             continue;
         }
+
+        // A pane showing a session that agent view's supervisor runs, where the
+        // version that counts is its worker's, as the row shows it. Retyping the
+        // pane cannot reach that worker: it would resume the transcript the pane
+        // started on, branching a conversation that carries on elsewhere. The
+        // supervisor does restart a worker that has fallen behind, but only one
+        // with nothing attached (`respawnIfIdleStale`, 2.1.299).
+        if let Some(away) = e.elsewhere(id, pid) {
+            matched.push(away.pid);
+            let aver = away.version.as_deref().unwrap_or("?");
+            if aver == newver {
+                continue;
+            }
+            p.skipped.push(if away.moved {
+                format!(
+                    "{} {}  {}, its conversation moved to background session {}: claude attach {}",
+                    id, tgt, aver, away.id, away.id
+                )
+            } else {
+                format!(
+                    "{} {}  {}, attached to background session {}, which agent view only restarts with nothing attached",
+                    id, tgt, aver, away.id
+                )
+            });
+            continue;
+        }
+
         if ver == newver {
             continue; // nothing to gain from interrupting it
         }
@@ -426,7 +466,7 @@ pub fn plan(
             }
         }
         let hook = e.hook_state(id, pid);
-        let st = state::reading(&screen, e.own_state(pid), hook.as_deref());
+        let st = state::reading(&screen, e.own_state(pid, &screen), hook.as_deref());
         if st.as_str() != "idle" && !o.include_busy {
             p.skipped.push(format!(
                 "{} {}  {}, {}: rerun when idle, or --include-busy",
@@ -446,18 +486,6 @@ pub fn plan(
             p.skipped.push(format!(
                 "{} {}  {}, work still in flight: rerun once it reports back, or --include-busy",
                 id, tgt, ver
-            ));
-            continue;
-        }
-
-        // Its conversation runs on in agent view's supervisor. Resuming the
-        // transcript this pane started on would branch it from the point it was
-        // backgrounded, while the real one carries on elsewhere.
-        if let Some(sid) = e.moved_to(pid) {
-            let short = sid.get(..8).unwrap_or(&sid);
-            p.skipped.push(format!(
-                "{} {}  {}, its conversation moved to background session {}: claude attach {}",
-                id, tgt, ver, short, short
             ));
             continue;
         }
@@ -635,13 +663,24 @@ impl Env for Live {
     fn hook_state(&self, pane: &str, pid: i32) -> Option<String> {
         taimux_core::hook::hook_state_of(pane, pid)
     }
-    fn own_state(&self, pid: i32) -> Option<state::State> {
-        taimux_core::status::of(pid).and_then(|o| o.state())
+    fn own_state(&self, pid: i32, screen: &str) -> Option<state::State> {
+        taimux_core::status::of(pid, &|| screen.to_string()).and_then(|o| o.state())
     }
-    fn moved_to(&self, pid: i32) -> Option<String> {
-        taimux_core::status::of(pid)
-            .filter(|o| o.via == taimux_core::status::Via::MovedTo)
-            .map(|o| o.session_id)
+    fn elsewhere(&self, pane: &str, pid: i32) -> Option<Elsewhere> {
+        // the screen is only read for a pane whose conversation has moved
+        let o =
+            taimux_core::status::of(pid, &|| self.capture(pane)).filter(|o| o.via.elsewhere())?;
+        let id = if o.job.is_empty() {
+            o.session_id.get(..8).unwrap_or(&o.session_id)
+        } else {
+            &o.job
+        };
+        Some(Elsewhere {
+            id: id.to_string(),
+            pid: o.pid,
+            version: version_of_pid(o.pid, &self.versions_dir),
+            moved: o.via == taimux_core::status::Via::MovedTo,
+        })
     }
     fn version_of_pid(&self, pid: i32) -> Option<String> {
         version_of_pid(pid, &self.versions_dir)
@@ -1165,8 +1204,9 @@ mod plan_tests {
         hooks: HashMap<String, String>,
         /// pid -> what the session says it is doing, for the ones that say
         own: HashMap<i32, state::State>,
-        /// pid -> the background session its conversation was moved into
-        moved: HashMap<i32, String>,
+        /// pid -> the background session it shows: its id, its worker's
+        /// version, and whether the pane's own conversation moved there
+        away: HashMap<i32, (String, String, bool)>,
         transcript: String,
         now: i64,
     }
@@ -1185,11 +1225,16 @@ mod plan_tests {
         fn hook_state(&self, pane: &str, _pid: i32) -> Option<String> {
             self.hooks.get(pane).cloned()
         }
-        fn own_state(&self, pid: i32) -> Option<state::State> {
+        fn own_state(&self, pid: i32, _screen: &str) -> Option<state::State> {
             self.own.get(&pid).copied()
         }
-        fn moved_to(&self, pid: i32) -> Option<String> {
-            self.moved.get(&pid).cloned()
+        fn elsewhere(&self, _pane: &str, pid: i32) -> Option<Elsewhere> {
+            self.away.get(&pid).map(|(id, ver, moved)| Elsewhere {
+                id: id.clone(),
+                pid: 1000 + pid,
+                version: Some(ver.clone()),
+                moved: *moved,
+            })
         }
         fn version_of_pid(&self, pid: i32) -> Option<String> {
             self.vers.get(&pid).cloned()
@@ -1232,7 +1277,7 @@ mod plan_tests {
             zooms: std::cell::Cell::new(0),
             hooks: HashMap::new(),
             own: HashMap::new(),
-            moved: HashMap::new(),
+            away: HashMap::new(),
             transcript: r#"{"type":"user","timestamp":"2020-01-01T00:00:00Z"}"#.to_string(),
             now: 1788312225,
         }
@@ -1335,14 +1380,45 @@ mod plan_tests {
     fn a_pane_whose_conversation_moved_to_the_background_is_left_alone() {
         let mut e = fake();
         e.own.insert(11, state::State::Idle);
-        e.moved
-            .insert(11, "2447b564-7a96-4774-b70a-ef4b730bdd4d".into());
+        e.away
+            .insert(11, ("2447b564".into(), "2.1.100".into(), true));
         let mut o = opts();
         o.include_busy = true; // not a busy-ness question at all
         let p = plan_of(&e, &o);
         assert!(p.go.is_empty());
         assert!(
             p.skipped[0].contains("moved to background session 2447b564: claude attach 2447b564"),
+            "{:?}",
+            p.skipped
+        );
+    }
+
+    /// The version that counts on a pane attached to a background session is
+    /// its worker's, either way round: a current client on a stale worker is
+    /// behind, and a stale client on a current worker has nothing to gain.
+    #[test]
+    fn an_attached_pane_is_judged_by_its_workers_version() {
+        let mut e = fake();
+        e.away
+            .insert(22, ("880ae832".into(), "2.1.250".into(), false));
+        let p = plan_of(&e, &opts());
+        assert_eq!(p.go.len(), 1, "{:?}", p.skipped);
+        assert_eq!(p.go[0].pane, "%1");
+        assert!(
+            p.skipped.iter().any(
+                |s| s.starts_with("%2 w:2.1  2.1.250, attached to background session 880ae832")
+            ),
+            "{:?}",
+            p.skipped
+        );
+
+        let mut e = fake();
+        e.away
+            .insert(11, ("880ae832".into(), "2.1.258".into(), false));
+        let p = plan_of(&e, &opts());
+        assert!(p.go.is_empty());
+        assert!(
+            p.skipped.iter().all(|s| !s.starts_with("%1")),
             "{:?}",
             p.skipped
         );

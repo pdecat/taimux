@@ -143,7 +143,7 @@ pub fn resolve_from_pane(pane: &str, cwd: &str, pid: i32) -> Option<Resolved> {
     // whose conversation was backgrounded from under it, is a session another
     // process is running: naming it here would have `restart` resume it a
     // second time in this pane, both writing one transcript.
-    if let Some(t) = crate::status::of(pid)
+    if let Some(t) = crate::status::of(pid, &String::new)
         .filter(|o| matches!(o.via, crate::status::Via::OwnFile | crate::status::Via::Cli))
         .and_then(|o| o.transcript())
     {

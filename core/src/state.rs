@@ -121,6 +121,18 @@ pub fn live_box(lines: &[&str]) -> Option<usize> {
     })
 }
 
+/// The session name on the rule above the live prompt box, `──── project: title ─`,
+/// or None for a bare rule, which is what a session whose name Claude Code
+/// derived itself draws. One too long for the pane comes back as drawn, cut
+/// short with `…`.
+pub fn box_label(screen: &str) -> Option<String> {
+    let lines: Vec<&str> = screen.lines().collect();
+    let at = live_box(&lines)?;
+    let rule = lines[..at].iter().rev().find(|l| !l.trim().is_empty())?;
+    let label = rule.trim().trim_matches('─').trim();
+    (!label.is_empty()).then(|| label.to_string())
+}
+
 /// What the turn line above the prompt box says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Turn {
@@ -493,6 +505,25 @@ mod tests {
         // a prompt already sent has conversation above it, not a rule
         let sent = "✻ Baked for 4s · done 11:46 PM\n\n❯ Run exactly this\n";
         assert_eq!(live_box(&sent.lines().collect::<Vec<_>>()), None);
+    }
+
+    #[test]
+    fn the_name_on_the_rule_is_the_box_label() {
+        let named =
+            "● done\n\n──────── gitlab-webhook-receiver: fix-ruff-ci-errors ─\n❯ \n────────\n";
+        assert_eq!(
+            box_label(named).as_deref(),
+            Some("gitlab-webhook-receiver: fix-ruff-ci-errors")
+        );
+        // narrow: cut short, and left that way for the caller to match
+        let cut = "──── cloudhealth-billing-board: cloud-inventorying-bill… ─\n❯ \n";
+        assert_eq!(
+            box_label(cut).as_deref(),
+            Some("cloudhealth-billing-board: cloud-inventorying-bill…")
+        );
+        // a derived name is not drawn, and a scrolled viewport has no box
+        assert_eq!(box_label(&at_prompt("● done")), None);
+        assert_eq!(box_label("● done\n❯ sent earlier\n"), None);
     }
 
     #[test]
