@@ -796,6 +796,12 @@ if [ -x "$WBIN" ]; then
     # asks: an older one drops any row that is not eight fields.
     eq "…and nine for a picker that asks with --since" "9" \
        "$("$WBIN" list --since 2>&1 | awk -F'\t' '{print NF; exit}')"
+    # The tenth, whether it left work in flight, likewise: a picker from before
+    # it drops any row that is not eight or nine. It brings the ninth with it.
+    eq "…and ten for one that asks with --background" "10" \
+       "$("$WBIN" list --since --background 2>&1 | awk -F'\t' '{print NF; exit}')"
+    eq "…which brings the ninth along by itself"    "10" \
+       "$("$WBIN" list --background 2>&1 | awk -F'\t' '{print NF; exit}')"
   else
     skip "no agent panes on this machine to shape-check"
   fi
@@ -829,11 +835,13 @@ if [ -x "$WBIN" ]; then
          "$(printf '%s\n' "$DOUT" | awk 'NF==0' | wc -l | tr -d ' ')"
       eq "…in the same eight fields"           "8" \
          "$(printf '%s' "$DOUT" | awk -F'\t' '{print NF; exit}')"
-      # The daemon serves nine, and it is `list` that takes the ninth off: a
-      # socket answer that skipped the trim would reach another host as a row
-      # it drops.
+      # The daemon serves ten, and it is `list` that takes the ninth and tenth
+      # off: a socket answer that skipped the trim would reach another host as
+      # a row it drops.
       eq "…and nine through it with --since"   "9" \
          "$("$WBIN" list --since 2>&1 | awk -F'\t' '{print NF; exit}')"
+      eq "…and ten with --background"          "10" \
+         "$("$WBIN" list --since --background 2>&1 | awk -F'\t' '{print NF; exit}')"
     else
       skip "no agent panes here to shape-check the daemon's answer"
     fi
@@ -1615,13 +1623,13 @@ else
 fi
 
 # ============================================================================
-section "Tab's outdated stop: the rows ctrl-x and F8 act on, gathered"
+section "Tab's background and outdated stops: questions that cross the states"
 # ============================================================================
-# Same reasoning as the keys above, and one more of its own: this stop is the
-# only one whose filter is not a STATE. It asks what a session is RUNNING, so it
-# crosses waiting, working and idle, and it can only be reached by pressing Tab
-# past all three. A cycle that quietly skipped it would look exactly like a cycle
-# that has it.
+# Same reasoning as the keys above, and one more of their own: these two stops
+# are the ones whose filter is not a STATE. One asks what a session left RUNNING,
+# the other what code it is running, so each crosses waiting, working and idle,
+# and they can only be reached by pressing Tab past all three. A cycle that
+# quietly skipped one would look exactly like a cycle that has it.
 #
 # The fixture owns its own HOME, because what counts as behind is measured
 # against the claude the launcher there points at: read off the developer's real
@@ -1629,9 +1637,9 @@ section "Tab's outdated stop: the rows ctrl-x and F8 act on, gathered"
 OSOCK="taimux-outdatedtest-$$"
 otmux() { tmux -f /dev/null -L "$OSOCK" "$@"; }
 if [ ! -x "$KBIN" ]; then
-  skip "Tab's outdated stop (no taimux built; run just build)"
+  skip "Tab's background and outdated stops (no taimux built; run just build)"
 elif ! command -v tmux >/dev/null 2>&1; then
-  skip "Tab's outdated stop (no tmux here to drive it in)"
+  skip "Tab's background and outdated stops (no tmux here to drive it in)"
 else
   OT="$TMP/outdated"; mkdir -p "$OT/run" "$OT/home/.local/bin" \
                                "$OT/home/.local/share/claude/versions" "$OT/bare"
@@ -1640,13 +1648,14 @@ else
 
   # One row per case the predicate has to get right: behind while idle, behind
   # while asking, current, another agent entirely, and one on another host (where
-  # the installed version here says nothing about it).
+  # the installed version here says nothing about it). Two of them left work in
+  # flight, the tenth field: one idle, one that has started a turn since.
   cat > "$OT/feed" <<'OFEED'
 #!/usr/bin/env bash
 [ "${1:-}" = _panes ] || exit 1
-printf '%%01\twork:1.1\t/tmp/p1\tclaude\t2.1.229\tidle\t-\trow-01\n'
+printf '%%01\twork:1.1\t/tmp/p1\tclaude\t2.1.229\tidle\t-\trow-01\t-\tbg\n'
 printf '%%02\twork:2.1\t/tmp/p2\tclaude\t2.1.229\tinput\t-\trow-02\n'
-printf '%%03\twork:3.1\t/tmp/p3\tclaude\t2.1.243\trun\t-\trow-03\n'
+printf '%%03\twork:3.1\t/tmp/p3\tclaude\t2.1.243\trun\t-\trow-03\t-\tbg\n'
 printf '%%04\tops:1.1\t/tmp/p4\tgemini\t0.41.2\tidle\t-\trow-04\n'
 printf 'ha:%%05\tops:2.1\t/tmp/p5\tclaude\t2.1.229\tidle\t-\trow-05\n'
 OFEED
@@ -1679,6 +1688,11 @@ OFEED
   otab; oexpect "tab: the sessions waiting"         "waiting for an answer"
   otab; oexpect "…then the ones working"            "working"
   otab; oexpect "…then the idle ones"               "idle at the prompt"
+  otab; oexpect "…then the ones running background work" "running background work"
+  # Idle with a shell still running, and working on a turn started since: the
+  # work is what it asks about, not what the session is doing.
+  sleep 0.3
+  eq "…which is every row with work in flight" "row-01 row-03" "$(orows)"
   otab; oexpect "…then the ones running outdated code" "running outdated code"
   # Behind while idle AND behind while asking: the stop crosses the states above
   # it rather than sitting inside one of them.
@@ -1691,7 +1705,7 @@ OFEED
   # re-emits a basic colour in its 256-colour form, so yellow reads back as
   # `38;5;3` and not the `33` the layout wrote; anchoring on the version text
   # keeps the waiting star, which is yellow too, out of the count.
-  otab; otab; otab; otab; owait "running outdated code"
+  otab; otab; otab; otab; otab; owait "running outdated code"
   eq "the two rows are the two yellow versions" "2" \
      "$(otmux capture-pane -pe 2>/dev/null | grep -c '\[38;5;3m2\.1\.229')"
 
@@ -1705,8 +1719,8 @@ OFEED
     "TAIMUX_SELF=$OT/feed TAIMUX_SEARCH=0 TAIMUX_SESSIONS=0 TAIMUX_REMOTE=0 \
      HOME=$OT/bare XDG_RUNTIME_DIR=$OT/run $KBIN tui >/dev/null 2>&1" 2>/dev/null
   owait "agent sessions"
-  otab; otab; otab; owait "idle at the prompt"
-  otab; oexpect "with no claude installed, idle is the last stop" "agent sessions"
+  otab; otab; otab; otab; owait "running background work"
+  otab; oexpect "with no claude installed, background is the last stop" "agent sessions"
   otmux kill-server 2>/dev/null
 fi
 

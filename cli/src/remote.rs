@@ -57,12 +57,14 @@ pub fn remote_taimux() -> &'static str {
 const INDEX_DUMP_CMD: &str = "index-dump";
 
 /// What `fetch` asks a remote host for: its rows, with the ninth field saying
-/// when each session last said something.
+/// when each session last said something and the tenth whether it left work in
+/// flight.
 ///
-/// A taimux too old to know `--since` ignores it, since `list` reads no
-/// arguments, and answers the eight fields it always did, which `render` takes
-/// as they are. So asking for more costs an older host nothing.
-const LIST_CMD: &str = "list --since";
+/// A taimux too old to know `--background` ignores it and answers the nine
+/// `--since` asks for, and one too old for both answers the eight fields it
+/// always did, since `list` read no arguments then. `render` takes all three
+/// as they are, so asking for more costs an older host nothing.
+const LIST_CMD: &str = "list --since --background";
 
 fn now() -> i64 {
     SystemTime::now()
@@ -348,8 +350,9 @@ pub fn render(host: &str, dir: &Path) -> String {
                 continue;
             }
             // Eight fields from a host that predates `--since`, nine from one
-            // that answered it. Anything else is a shape this build cannot read.
-            if matches!(line.split('\t').count(), 8 | 9) {
+            // that predates `--background`, ten from one that answered both.
+            // Anything else is a shape this build cannot read.
+            if matches!(line.split('\t').count(), 8..=10) {
                 s.push_str(&format!("{}:{}\n", host, line));
             } else {
                 bad += 1;
@@ -772,7 +775,25 @@ mod tests {
             render("ha", &d),
             "ha:%6\tmain:1.7\t/w\tclaude\t2.1.1\tidle\t-\tover there\t1700000000000\n"
         );
-        assert!(LIST_CMD.starts_with("list ") && LIST_CMD.ends_with(" --since"));
+        assert!(LIST_CMD.starts_with("list ") && LIST_CMD.contains(" --since"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// …and one that answered `--background` too sends a tenth, whether the
+    /// session left work in flight, taken whole just the same.
+    #[test]
+    fn a_reply_carrying_background_work_is_taken_whole() {
+        let d = fixture("b");
+        std::fs::write(
+            d.join("ha"),
+            "ok 100\n%6\tmain:1.7\t/w\tclaude\t2.1.1\tidle\t-\tover there\t1700000000000\tbg\n",
+        )
+        .unwrap();
+        assert_eq!(
+            render("ha", &d),
+            "ha:%6\tmain:1.7\t/w\tclaude\t2.1.1\tidle\t-\tover there\t1700000000000\tbg\n"
+        );
+        assert!(LIST_CMD.ends_with(" --background"));
         let _ = std::fs::remove_dir_all(&d);
     }
 

@@ -181,13 +181,15 @@ pub fn tmux_panes() -> Vec<Pane> {
 
 // ---- moved out of main.rs: composing the rows a pane scan turns into.
 /// The full row the picker consumes:
-///   pane_id \t target \t cwd \t agent \t version \t state \t mode \t title \t last
+///   pane_id \t target \t cwd \t agent \t version \t state \t mode \t title \t last \t bg
 ///
 /// `last` is when the session last said something, in epoch milliseconds (see
 /// `hook::last_said`), or `-` where nothing tells: only claude reports it, and
-/// only through its hook line. It rides at the END so that everything reading
-/// the first eight fields by position reads them as it always did, and it stays
-/// out of what another host is sent unless that host asks: see `wire`.
+/// only through its hook line. `bg` says whether a finished turn left work in
+/// flight, a shell or a subagent still running (see `state::background`), and is
+/// `bg` or `-`. Both ride at the END so that everything reading the first eight
+/// fields by position reads them as it always did, and they stay out of what
+/// another host is sent unless that host asks: see `wire`.
 ///
 /// Only the title may be empty. Every other field carries a placeholder instead,
 /// because bash's `read` collapses runs of tabs and a blank field would silently
@@ -294,6 +296,13 @@ fn row_of(
         own.as_ref().and_then(|o| o.state()),
         hook.as_ref().map(|e| e.state.as_str()),
     );
+    // Its own field rather than a state of its own: the session is idle
+    // meanwhile, and the two readings must never be folded back into one.
+    let bg = if crate::state::background(&screen, hook.as_ref().map(|e| e.state.as_str())) {
+        "bg"
+    } else {
+        "-"
+    };
     let last = hook
         .as_ref()
         .filter(|e| e.last > 0)
@@ -314,7 +323,7 @@ fn row_of(
     };
 
     Some(format!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         id,
         target,
         cwd,
@@ -323,25 +332,37 @@ fn row_of(
         merged.as_str(),
         mode,
         title,
-        last
+        last,
+        bg
     ))
 }
 
-/// The rows as `taimux list` prints them: the eight fields every taimux reads,
-/// and the ninth only when asked for.
-///
-/// `list` is the wire format, and another host's picker keeps only rows of
-/// exactly eight fields, calling anything else "another format" and dropping it.
-/// So the extra field would blank this host out of every picker that has not
-/// upgraded yet. A picker that knows the field asks with `list --since`, which a
-/// taimux too old to know the flag ignores, answering the eight it always did.
-pub fn wire(rows: &str, since: bool) -> String {
-    if since {
-        return rows.to_string();
+/// How many fields `taimux list` sends: the eight every taimux reads, the ninth
+/// for `--since`, and the tenth for `--background`, which brings the ninth with
+/// it since fields are read by position.
+pub fn wire_fields(since: bool, background: bool) -> usize {
+    if background {
+        10
+    } else if since {
+        9
+    } else {
+        8
     }
+}
+
+/// The rows as `taimux list` prints them: their first `fields` fields.
+///
+/// `list` is the wire format, and another host's picker keeps only rows of the
+/// shapes it knows, calling anything else "another format" and dropping it: a
+/// picker from before `--since` takes exactly eight fields, and one from before
+/// `--background` eight or nine. So an extra field would blank this host out of
+/// every picker that has not upgraded yet. A picker that knows a field asks for
+/// it, and a taimux too old to know the flag ignores it, answering the fields it
+/// always did.
+pub fn wire(rows: &str, fields: usize) -> String {
     let mut out = String::with_capacity(rows.len());
     for line in rows.lines() {
-        out.push_str(&line.split('\t').take(8).collect::<Vec<_>>().join("\t"));
+        out.push_str(&line.split('\t').take(fields).collect::<Vec<_>>().join("\t"));
         out.push('\n');
     }
     out
@@ -512,22 +533,31 @@ mod tests {
     }
 
     /// `list` sends another host the eight fields every taimux reads, since an
-    /// older picker drops a row of any other shape, and the ninth only to a
-    /// picker that asked for it.
+    /// older picker drops a row of any other shape, and the ninth and tenth only
+    /// to a picker that asked for them.
     #[test]
-    fn the_wire_carries_eight_fields_unless_the_ninth_is_asked_for() {
-        let rows = "%1\tw:1.1\t/a\tclaude\t2.1\tidle\t-\tsome title\t1700000000000\n\
-                    %2\tw:2.1\t/b\tcodex\t0.9\trun\t-\t\t-\n";
-        let plain = wire(rows, false);
+    fn the_wire_carries_eight_fields_unless_more_are_asked_for() {
+        let rows = "%1\tw:1.1\t/a\tclaude\t2.1\tidle\t-\tsome title\t1700000000000\tbg\n\
+                    %2\tw:2.1\t/b\tcodex\t0.9\trun\t-\t\t-\t-\n";
+        let plain = wire(rows, wire_fields(false, false));
         assert_eq!(
             plain,
             "%1\tw:1.1\t/a\tclaude\t2.1\tidle\t-\tsome title\n\
              %2\tw:2.1\t/b\tcodex\t0.9\trun\t-\t\n"
         );
         assert!(plain.lines().all(|l| l.split('\t').count() == 8));
-        assert_eq!(wire(rows, true), rows);
-        // rows already in the old shape go through untouched
-        assert_eq!(wire(&plain, false), plain);
+        let since = wire(rows, wire_fields(true, false));
+        assert_eq!(
+            since,
+            "%1\tw:1.1\t/a\tclaude\t2.1\tidle\t-\tsome title\t1700000000000\n\
+             %2\tw:2.1\t/b\tcodex\t0.9\trun\t-\t\t-\n"
+        );
+        assert_eq!(wire(rows, wire_fields(true, true)), rows);
+        // the tenth brings the ninth with it, being read by position
+        assert_eq!(wire(rows, wire_fields(false, true)), rows);
+        // rows already in an older shape go through untouched
+        assert_eq!(wire(&plain, wire_fields(true, true)), plain);
+        assert_eq!(wire(&since, wire_fields(true, true)), since);
     }
 
     fn live(p: &Pane) -> Option<String> {

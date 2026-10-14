@@ -635,9 +635,11 @@ fn sh_quote(s: &str) -> String {
     s.replace('\'', "'\\''")
 }
 
-/// Whether `list` was asked for the ninth field, `taimux list --since`.
-fn since_asked() -> bool {
-    std::env::args().skip(2).any(|a| a == "--since")
+/// How many fields `list` was asked for: the ninth with `taimux list --since`,
+/// the tenth with `--background`. See `panes::wire`.
+fn fields_asked() -> usize {
+    let asked = |flag: &str| std::env::args().skip(2).any(|a| a == flag);
+    taimux_core::panes::wire_fields(asked("--since"), asked("--background"))
 }
 
 /// The other half of a resize: open the new popup once the old one is gone.
@@ -841,8 +843,9 @@ fn state_report(id: &str) -> i32 {
         }
     );
     let hook_state = current.as_ref().map(|e| e.state.as_str());
-    // The one reading `restart` adds to the list's, and the one a row cannot show:
-    // said here so a refusal of a pane the list calls idle is not a mystery.
+    // The one reading `restart` adds to the list's state, which a row carries in
+    // a field of its own for the background stop: said here so a refusal of a
+    // pane the list calls idle is not a mystery.
     if state::background(&screen, hook_state) {
         println!("background  work still in flight, so restart leaves it alone");
     }
@@ -898,24 +901,25 @@ fn main() {
         // `list-local` is the same thing with the daemon never asked, which is
         // what the differentials and the golden replay want.
         //
-        // Both print the eight fields every taimux reads, and `--since` adds the
-        // ninth, when each session last said something: another host's picker
-        // drops a row of any other shape, so the field is only sent to one that
-        // asks for it. See `panes::wire`.
+        // Both print the eight fields every taimux reads, `--since` adds the
+        // ninth, when each session last said something, and `--background` the
+        // tenth, whether a finished turn left work in flight: another host's
+        // picker drops a row of any shape it does not know, so a field is only
+        // sent to one that asks for it. See `panes::wire`.
         "list" => {
             let rows = taimux_daemon::protocol::rows().unwrap_or_else(|| {
                 let mut p = taimux_core::version::Prober::new();
                 let mut c = HashMap::new();
                 taimux_core::panes::list_rows(&mut p, &mut c)
             });
-            print!("{}", taimux_core::panes::wire(&rows, since_asked()));
+            print!("{}", taimux_core::panes::wire(&rows, fields_asked()));
             0
         }
         "list-local" => {
             let mut p = taimux_core::version::Prober::new();
             let mut c = HashMap::new();
             let rows = taimux_core::panes::list_rows(&mut p, &mut c);
-            print!("{}", taimux_core::panes::wire(&rows, since_asked()));
+            print!("{}", taimux_core::panes::wire(&rows, fields_asked()));
             0
         }
         // No daemon needed: the same scan, run in-process. This is what makes the
@@ -1511,9 +1515,10 @@ fn main() {
                 home: &home,
                 newver: &newver,
                 only: &only,
-                // What the picker's outdated stop passes, so this entry point can
-                // still express every list the picker can draw.
+                // What the picker's outdated and background stops pass, so this
+                // entry point can still express every list the picker can draw.
                 outdated: a.iter().any(|x| x == "--outdated"),
+                background: a.iter().any(|x| x == "--background"),
                 query: &query,
                 snips: pairs("TAIMUX_SNIPS"),
                 ptitles: pairs("TAIMUX_PTITLES"),

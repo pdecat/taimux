@@ -271,7 +271,7 @@ pub fn turn_marker(screen: &str) -> Option<Turn> {
 /// pane that settled it had finished at 4:55 PM with two watchers still going,
 /// due to report at 19:00 and 19:25, and the list would have called it working
 /// for the two and a half hours it sat at an empty prompt. Whether such work is
-/// in flight is a question of its own, `background`, and only `restart` asks it.
+/// in flight is a question of its own, `background`.
 pub fn is_working(screen: &str) -> bool {
     turn_marker(screen) == Some(Turn::Running)
 }
@@ -282,8 +282,9 @@ pub fn is_working(screen: &str) -> bool {
 /// still running`.
 ///
 /// The session is idle meanwhile and the list says so, but that work runs as its
-/// children and would die with it, so this is what keeps `restart` off it.
-/// Either sign is enough and neither can clear the other, because the only cost
+/// children and would die with it, so this is what keeps `restart` off it. A row
+/// carries the answer in a field of its own, which is what Tab's background stop
+/// lists, never folded into the state. Either sign is enough and neither can clear the other, because the only cost
 /// of a wrong yes is a restart that asks for `--include-busy`, and a wrong no
 /// kills the work.
 pub fn background(screen: &str, hook: Option<&str>) -> bool {
@@ -383,7 +384,7 @@ pub fn correct(hook: &str, hook_at: i64, turn: Option<(crate::turn::Event, i64)>
 /// does: the turn is over and the prompt is free, whatever it left running. It
 /// used to read as working, which kept a session in the working list for as long
 /// as its slowest watcher ran, hours at a time. The work itself is what
-/// `background` answers, for `restart`, which is the one caller it matters to.
+/// `background` answers, for `restart` and for the background stop.
 pub fn merge(screen: &str, hook: Option<&str>) -> State {
     let screen_state = classify(screen);
     if screen_state == State::Input {

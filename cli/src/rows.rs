@@ -359,6 +359,14 @@ pub struct Input<'a> {
     /// idle can each be behind. Which is also why this list crosses the four
     /// state modes rather than sitting inside one of them.
     pub outdated: bool,
+    /// Keep only the rows whose session left work in flight, a shell or a
+    /// subagent still running: the tenth field, `bg`.
+    ///
+    /// Not a state either, for the same reason the hook line's `bg` reads as
+    /// idle: the turn is over and the prompt is free. It is the question
+    /// `restart` asks on top of the state, and a session that has started a new
+    /// turn since can still have that work running.
+    pub background: bool,
     pub query: &'a str,
     /// pane id to the snippet of what that session said, when searching.
     ///
@@ -399,6 +407,11 @@ pub fn build(lines: &str, input: &Input) -> Vec<Row> {
         }
         let state = f[5];
         if !input.only.is_empty() && state != input.only {
+            continue;
+        }
+        // Nothing at all is "not known", which is every row from a host whose
+        // taimux predates the field, and so is anything other than `bg`.
+        if input.background && f.get(9) != Some(&"bg") {
             continue;
         }
         let (id, target, cwd) = (f[0], f[1], f[2]);
@@ -1013,6 +1026,39 @@ mod tests {
         assert_eq!(r.len(), 3);
     }
 
+    /// The background list holds the rows whose tenth field is `bg`, whatever
+    /// their state: a turn that left a shell running is idle, and one started
+    /// since can be working with that shell still going. A row with no tenth
+    /// field, from a host whose taimux predates it, is not known to have any.
+    #[test]
+    fn the_background_list_holds_the_rows_with_work_in_flight() {
+        let lines = "%1\ta:1.1\t/home/p\tclaude\t2.1\tidle\t-\twatching\t-\tbg\n\
+                     %2\tb:1.1\t/home/p\tclaude\t2.1\tidle\t-\tnothing left\t-\t-\n\
+                     %3\tc:1.1\t/home/p\tclaude\t2.1\trun\t-\tnew turn\t-\tbg\n\
+                     ha:%4\td:1.1\t/home/p\tclaude\t2.1\tidle\t-\tolder host\t-\n\
+                     ha:%5\te:1.1\t/home/p\tclaude\t2.1\tidle\t-\toldest host";
+        let r = build(
+            lines,
+            &Input {
+                width: 100,
+                background: true,
+                ..Default::default()
+            },
+        );
+        let ids: Vec<&str> = r.iter().map(|r| r.pane_id.as_str()).collect();
+        assert_eq!(ids, ["%1", "%3"]);
+        // …and the field changes nothing on screen, nor what every other list holds
+        let all = build(
+            lines,
+            &Input {
+                width: 100,
+                ..Default::default()
+            },
+        );
+        assert_eq!(all.len(), 5);
+        assert_eq!(r[0].plain(), all[0].plain());
+    }
+
     #[test]
     fn one_state_only_when_asked() {
         let r = build(
@@ -1117,7 +1163,7 @@ mod tests {
         let r = build(rows, &Input::default());
         let since: Vec<Option<i64>> = r.iter().map(|r| r.since).collect();
         assert_eq!(since, [Some(1_700_000_000_000), None, None]);
-        let eight = build(&taimux_core::panes::wire(rows, false), &Input::default());
+        let eight = build(&taimux_core::panes::wire(rows, 8), &Input::default());
         assert_eq!(
             r.iter().map(Row::plain).collect::<Vec<_>>(),
             eight.iter().map(Row::plain).collect::<Vec<_>>(),

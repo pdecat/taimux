@@ -66,6 +66,7 @@ ones. Same pane scan, same reading of what each session is doing. See
 - [Usage](#usage)
 - [A terminal that changes size](#a-terminal-that-changes-size)
 - [Searching what a session said](#searching-what-a-session-said)
+- [Sessions running background work](#sessions-running-background-work)
 - [Sessions running outdated code](#sessions-running-outdated-code)
 - [Past sessions](#past-sessions)
 - [Carrying a conversation into another agent](#carrying-a-conversation-into-another-agent)
@@ -95,7 +96,7 @@ The column before the summary answers it, in three states:
 |---|---|
 | `✳` | **waiting for an answer**, the one worth looking for (and the only one in colour) |
 | `◐` | working: a turn is in flight |
-| blank | idle at the prompt, background work included: a turn that left a shell running is over |
+| blank | idle at the prompt, background work included: a turn that left a shell running is over, and Tab's [background stop](#sessions-running-background-work) is where those are found |
 
 The column is two wide whichever it is, so every summary starts in the same place.
 
@@ -153,15 +154,16 @@ turn's.
 
 A dialog wins over a turn line, since it is the row that wants you.
 
-**Tab** cycles the list through those states, one at a time and back, with two
-further stops that are not states at all. One asks a different question of the
-same list, what each session is *running* rather than what it is doing (see
-[Sessions running outdated code](#sessions-running-outdated-code)); the other is
-a different list entirely, the conversations nothing is running any more (see
-[Past sessions](#past-sessions)).
+**Tab** cycles the list through those states, one at a time and back, with three
+further stops that are not states at all. Two ask a different question of the
+same list: what each session left *running* when its turn ended (see [Sessions
+running background work](#sessions-running-background-work)), and what code it
+is running (see [Sessions running outdated code](#sessions-running-outdated-code)).
+The third is a different list entirely, the conversations nothing is running any
+more (see [Past sessions](#past-sessions)).
 
 ```
-all sessions  →  waiting  →  working  →  idle  →  outdated  →  past sessions  →  all sessions
+all sessions  →  waiting  →  working  →  idle  →  background  →  outdated  →  past sessions  →  all sessions
 ```
 
 **Shift-Tab** walks the same ring the other way, and skips the same empty stops.
@@ -296,7 +298,7 @@ The state is one of five:
 | `input` | a permission was asked for, which auto mode may have answered unseen |
 | `ask` | the same, **confirmed on screen**: Claude's own `permission_prompt` notification goes out once a prompt has sat there unanswered for about six seconds, and never for one auto mode settled. AskUserQuestion and MCP forms count too |
 | `idle` | the turn is over |
-| `bg` | the turn is over, but `Stop` listed background work still in flight (a shell, a subagent), and the session will wake itself when it reports back. Reads as **idle**, since its prompt is free, but `restart` still leaves it alone: that work runs as the session's children and would die with it |
+| `bg` | the turn is over, but `Stop` listed background work still in flight (a shell, a subagent), and the session will wake itself when it reports back. Reads as **idle**, since its prompt is free, but `restart` still leaves it alone: that work runs as the session's children and would die with it. Tab's [background stop](#sessions-running-background-work) lists it |
 
 `ask` is what lets a session read as waiting when its screen cannot show the
 dialog: a pane too short to draw one, or a viewport scrolled away from it.
@@ -651,7 +653,7 @@ Inside the picker:
 | click          | put the cursor on that row       |
 | double-click   | …and switch to it, as `Enter` would |
 | `Enter`        | switch to the pane (and zoom it), or [reopen a past session in its own tool](#past-sessions) |
-| `Tab`          | cycle the list: all → waiting → working → idle → [outdated](#sessions-running-outdated-code) → [past](#past-sessions) → all |
+| `Tab`          | cycle the list: all → waiting → working → idle → [background](#sessions-running-background-work) → [outdated](#sessions-running-outdated-code) → [past](#past-sessions) → all |
 | `Shift-Tab`    | …the same ring, backwards       |
 | `Ctrl-r`       | refresh the list now            |
 | `Ctrl-/`       | toggle the preview              |
@@ -1012,13 +1014,45 @@ every project's file names in every conversation that ever touched it.
 
 
 
+## Sessions running background work
+
+A turn can end with work still going: a shell Claude put in the background, a
+subagent it sent off, a watcher due to report at seven. The session is
+[idle](#what-a-session-is-doing) meanwhile, since its prompt is as free as any
+other, so the idle list is where it sits, looking exactly like the sessions with
+nothing left to do. Tab's fifth stop is the ones that are not:
+
+```
+running background work                                                     2/7
+
+  work:1.1        Watch the deploy and report back   infra/deploy    claude 2.1.243
+  ops:3.1       ◐ Fix the flaky CI pipeline          infra/terraform claude 2.1.243
+```
+
+A row is here when either sign of that work is up, the same two `restart` reads
+before it refuses a session (see [`taimux restart`](#taimux-restart)): the hook
+line reads `bg`, which `Stop` writes when its `background_tasks` lists anything
+(see [Told, rather than guessed](#told-rather-than-guessed)), or the finished
+turn line says so, `✻ Sautéed for 11s · done 11:39 PM · 1 shell still running`.
+So these are also the sessions a restart leaves alone for that reason.
+
+Like the outdated stop below it, this one is **not a state**, and it crosses
+the states above it: the work outlives the turn that started it, so a session
+that has taken a new prompt since is working *and* still has that shell going.
+Left open, it empties itself as each piece of work reports back.
+
+Only Claude Code says what it left running, so a session of any other agent is
+never in this list, and neither is one on a [host](#sessions-on-other-hosts)
+whose taimux predates the field. The stop is always in the ring, as the states
+are: it is often empty, but nothing about a machine says it always will be.
+
 ## Sessions running outdated code
 
 Claude Code updates itself several times a day and a running session keeps the
 inode it started with, so on any machine that has been up a while some of these
 rows are executing code that was replaced hours ago. The
 [version column](#agent-version) says which ones by painting them **yellow**.
-Tab's fifth stop is that same question asked of the whole list:
+Tab's sixth stop is that same question asked of the whole list:
 
 ```
 running outdated code                                                       2/2
@@ -1029,7 +1063,7 @@ running outdated code                                                       2/2
 
 It is not a state, which is why it sits outside the four that are: a session
 waiting for an answer is as far behind as an idle one, so this stop **crosses**
-the three above it. What it holds is exactly the rows `Ctrl-x` and `F8` act on,
+the three states above it. What it holds is exactly the rows `Ctrl-x` and `F8` act on,
 and for the same reasons: never a session on
 [another host](#sessions-on-other-hosts) (the installed version here says
 nothing about what that box would start), never an
@@ -1348,12 +1382,14 @@ host answering with remotes of its own is what would make a cycle (two boxes
 ssh'd into each other) possible, and it simply cannot.
 
 Being the wire format, it also keeps its shape. A picker keeps only rows of the
-eight fields it knows and says "its taimux answers in another format" for the
-rest, so `list` prints those eight, and the ninth, when each session last said
-something (what `Ctrl-s` sorts the idle list on), only to a picker that asks with
-`list --since`. A taimux too old to know the flag ignores it, since `list` reads
-no arguments, and answers the eight it always did: its sessions are listed as
-before and simply sort after the dated ones.
+fields it knows and says "its taimux answers in another format" for the rest, so
+`list` prints the eight every taimux reads, the ninth, when each session last
+said something (what `Ctrl-s` sorts the idle list on), only to a picker that asks
+with `list --since`, and the tenth, whether a finished turn left work in flight
+(what the [background stop](#sessions-running-background-work) lists), only to
+one that asks with `--background`. A taimux too old to know a flag ignores it,
+and answers the fields it always did: its sessions are listed as before, simply
+sort after the dated ones, and are never in the background list.
 
 **Enter** puts that host's tmux on the pane you picked, *then* takes you to the
 pane ssh is running in, so the window is already right when you land. The remote

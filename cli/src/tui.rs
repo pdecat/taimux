@@ -62,17 +62,20 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
 /// Which list is on screen. Tab steps round the cycle.
 ///
-/// The first four are the same question asked of the same list, and the last two
-/// are not states at all: Outdated asks a different question of it (what is this
-/// session RUNNING, rather than what is it doing), and Dead changes what the list
-/// IS. So they sit at the far end, in that order, rather than between two states
-/// of a running session.
+/// The first four are the same question asked of the same list, and the last
+/// three are not states at all: Background and Outdated ask different questions
+/// of it (what did this session leave RUNNING, what code is it running, rather
+/// than what is it doing), and Dead changes what the list IS. So they sit at the
+/// far end, in that order, rather than between two states of a running session.
+/// Background comes first of them because it is nearest to idle, where most of
+/// its rows are.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
     All,
     Input,
     Run,
     Idle,
+    Background,
     Outdated,
     Dead,
 }
@@ -82,13 +85,17 @@ impl Mode {
     ///
     /// Outdated is empty because being behind is not a state: a session waiting,
     /// working or idle can each be running code a self-update has replaced, and
-    /// that filter rides on `Input::outdated` instead.
+    /// that filter rides on `Input::outdated` instead. Background is empty for
+    /// the same reason, and rides on `Input::background`: a turn that left a
+    /// shell running is idle, and one started since can be working with that
+    /// shell still going.
     fn filter(self) -> &'static str {
         match self {
             Mode::All => "",
             Mode::Input => "input",
             Mode::Run => "run",
             Mode::Idle => "idle",
+            Mode::Background => "",
             Mode::Outdated => "",
             Mode::Dead => "dead",
         }
@@ -100,19 +107,21 @@ impl Mode {
             Mode::Input => "waiting for an answer",
             Mode::Run => "working",
             Mode::Idle => "idle at the prompt",
+            Mode::Background => "running background work",
             Mode::Outdated => "running outdated code",
             Mode::Dead => "past sessions",
         }
     }
 
     /// The name this mode is carried across a reopen by. Its own word rather
-    /// than the state filter, since Outdated and All share that.
+    /// than the state filter, since Background, Outdated and All share that.
     pub fn key(self) -> &'static str {
         match self {
             Mode::All => "all",
             Mode::Input => "input",
             Mode::Run => "run",
             Mode::Idle => "idle",
+            Mode::Background => "background",
             Mode::Outdated => "outdated",
             Mode::Dead => "dead",
         }
@@ -123,6 +132,7 @@ impl Mode {
             "input" => Mode::Input,
             "run" => Mode::Run,
             "idle" => Mode::Idle,
+            "background" => Mode::Background,
             "outdated" => Mode::Outdated,
             "dead" => Mode::Dead,
             _ => Mode::All,
@@ -136,12 +146,16 @@ impl Mode {
     /// nothing installed to compare a version against, no outdated stop. An
     /// empty list you can still land on is one you have to press Tab past every
     /// time round.
-    fn cycle(ended: bool, outdated: bool) -> [(Mode, bool); 6] {
+    ///
+    /// The background stop is always on, as the states are: it can be empty
+    /// right now, but nothing about the machine says it always will be.
+    fn cycle(ended: bool, outdated: bool) -> [(Mode, bool); 7] {
         [
             (Mode::All, true),
             (Mode::Input, true),
             (Mode::Run, true),
             (Mode::Idle, true),
+            (Mode::Background, true),
             (Mode::Outdated, outdated),
             (Mode::Dead, ended),
         ]
@@ -163,7 +177,8 @@ impl Mode {
             .unwrap_or(Mode::All)
     }
 
-    /// One step round: all, waiting, working, idle, outdated, ended, all.
+    /// One step round: all, waiting, working, idle, background, outdated,
+    /// ended, all.
     fn next(self, ended: bool, outdated: bool) -> Mode {
         self.step(false, ended, outdated)
     }
@@ -1398,6 +1413,10 @@ impl App {
                 // one you just pressed ctrl-x on stays in this list, marked ↻,
                 // until it comes back on the installed one and drops out of it.
                 outdated: mode == Mode::Outdated,
+                // A row whose work reports back while you watch drops out at
+                // the next refresh, so the list empties itself as the outdated
+                // one does.
+                background: mode == Mode::Background,
                 query: &self.query,
                 snips: self.snippets(mode),
                 // A live pane can publish no title at all: claude sets one at a
@@ -2535,6 +2554,7 @@ mod tests {
         // …and it comes back as the same picker on the other side
         assert_eq!(Mode::from_key(state.mode), Mode::Run);
         assert_eq!(Mode::from_key("outdated"), Mode::Outdated);
+        assert_eq!(Mode::from_key("background"), Mode::Background);
         assert_eq!(Mode::from_key(""), Mode::All);
     }
 
@@ -2657,7 +2677,7 @@ mod tests {
     #[test]
     fn tab_steps_round_the_cycle_and_starts_over() {
         let mut m = Mode::All;
-        let seen: Vec<Mode> = (0..6)
+        let seen: Vec<Mode> = (0..7)
             .map(|_| {
                 m = m.next(true, true);
                 m
@@ -2669,6 +2689,7 @@ mod tests {
                 Mode::Input,
                 Mode::Run,
                 Mode::Idle,
+                Mode::Background,
                 Mode::Outdated,
                 Mode::Dead,
                 Mode::All
@@ -2681,7 +2702,7 @@ mod tests {
     #[test]
     fn shift_tab_steps_the_other_way_round_the_cycle() {
         let mut m = Mode::All;
-        let seen: Vec<Mode> = (0..6)
+        let seen: Vec<Mode> = (0..7)
             .map(|_| {
                 m = m.prev(true, true);
                 m
@@ -2692,6 +2713,7 @@ mod tests {
             vec![
                 Mode::Dead,
                 Mode::Outdated,
+                Mode::Background,
                 Mode::Idle,
                 Mode::Run,
                 Mode::Input,
@@ -2703,6 +2725,7 @@ mod tests {
             Mode::Input,
             Mode::Run,
             Mode::Idle,
+            Mode::Background,
             Mode::Outdated,
             Mode::Dead,
         ] {
@@ -2715,10 +2738,10 @@ mod tests {
     /// picker in a mode with no rows in it.
     #[test]
     fn the_ended_mode_is_skipped_without_a_sessions_cache() {
-        assert_eq!(Mode::Idle.next(false, false), Mode::All);
-        assert_eq!(Mode::Idle.next(true, false), Mode::Dead);
+        assert_eq!(Mode::Background.next(false, false), Mode::All);
+        assert_eq!(Mode::Background.next(true, false), Mode::Dead);
         // and backwards it is skipped the same way
-        assert_eq!(Mode::All.prev(false, false), Mode::Idle);
+        assert_eq!(Mode::All.prev(false, false), Mode::Background);
         assert_eq!(Mode::All.prev(true, false), Mode::Dead);
     }
 
@@ -2727,14 +2750,24 @@ mod tests {
     /// list could only ever be empty.
     #[test]
     fn the_outdated_mode_is_skipped_when_no_version_is_installed() {
-        assert_eq!(Mode::Idle.next(false, true), Mode::Outdated);
+        assert_eq!(Mode::Background.next(false, true), Mode::Outdated);
         assert_eq!(Mode::Outdated.next(false, true), Mode::All);
         assert_eq!(Mode::Outdated.next(true, true), Mode::Dead);
-        // both gates off: idle is the last stop
-        assert_eq!(Mode::Idle.next(false, false), Mode::All);
+        // both gates off: background is the last stop
+        assert_eq!(Mode::Background.next(false, false), Mode::All);
         // …and going back from the first stop skips it just the same
-        assert_eq!(Mode::All.prev(false, false), Mode::Idle);
+        assert_eq!(Mode::All.prev(false, false), Mode::Background);
         assert_eq!(Mode::All.prev(false, true), Mode::Outdated);
+    }
+
+    /// The background stop is never skipped, as no state stop is: it comes
+    /// straight after idle whatever else is installed.
+    #[test]
+    fn the_background_mode_follows_idle_whatever_is_installed() {
+        for (ended, outdated) in [(false, false), (true, false), (false, true), (true, true)] {
+            assert_eq!(Mode::Idle.next(ended, outdated), Mode::Background);
+            assert_eq!(Mode::Background.prev(ended, outdated), Mode::Idle);
+        }
     }
 
     #[test]
@@ -2750,6 +2783,10 @@ mod tests {
         assert_eq!(
             label(Mode::Outdated, false, false, false, false),
             " running outdated code "
+        );
+        assert_eq!(
+            label(Mode::Background, false, false, false, false),
+            " running background work "
         );
         assert_eq!(
             label(Mode::Dead, false, true, true, false),
@@ -2906,7 +2943,13 @@ mod tests {
         a.rebuild();
         assert!(!a.dated(), "all sessions at once is never in date order");
         assert_eq!(ids(&a), ["%2", "%1"], "so a query still ranks it");
-        for m in [Mode::All, Mode::Input, Mode::Run, Mode::Outdated] {
+        for m in [
+            Mode::All,
+            Mode::Input,
+            Mode::Run,
+            Mode::Background,
+            Mode::Outdated,
+        ] {
             assert!(!m.has_dates(), "{m:?}");
         }
         assert!(Mode::Idle.has_dates() && Mode::Dead.has_dates());
@@ -3031,6 +3074,28 @@ mod tests {
         a.src.newver = String::new();
         a.rebuild();
         assert!(a.view.is_empty());
+    }
+
+    /// The background stop lists the sessions that left work in flight, idle or
+    /// working, and Tab lands on it straight from the idle one.
+    #[test]
+    fn the_background_mode_lists_the_sessions_with_work_in_flight() {
+        let mut a = app("%1\ta:1.1\t/h\tclaude\t1\tidle\t-\twatching ci\t-\tbg\n\
+                         %2\tb:1.1\t/h\tclaude\t1\tidle\t-\tall done\t-\t-\n\
+                         %3\tc:1.1\t/h\tclaude\t1\trun\t-\tanother turn\t-\tbg\n\
+                         %4\td:1.1\t/h\tcodex\t1\tidle\t-\tcannot say");
+        a.mode = Mode::Idle;
+        a.step_mode(false);
+        assert_eq!(a.mode, Mode::Background);
+        assert_eq!(
+            ids(&a),
+            ["%1", "%3"],
+            "idle or working, whatever is still running"
+        );
+        // …and once that work has reported back the row drops out
+        a.tsv = a.tsv.replace("watching ci\t-\tbg", "watching ci\t-\t-");
+        a.rebuild();
+        assert_eq!(ids(&a), ["%3"]);
     }
 
     const VERSIONS: &str = "%1\ta:1.1\t/h\tclaude\t2.1.229\tidle\t-\tbehind\n\
