@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.2](https://github.com/pdecat/taimux/compare/v0.21.1...v0.21.2) (2026-10-14)
+
+
+### Bug fixes
+
+* an attached pane reports the version its background worker runs ([539794c](https://github.com/pdecat/taimux/commit/539794c60e5388e37554a978012a6b02b5d44cfe))
+
 ## [0.21.1](https://github.com/pdecat/taimux/compare/v0.21.0...v0.21.1) (2026-10-07)
 
 
