@@ -191,18 +191,6 @@ impl Mode {
     fn prev(self, ended: bool, outdated: bool) -> Mode {
         self.step(true, ended, outdated)
     }
-
-    /// Whether this list has a date worth sorting it by, which is what binds
-    /// ctrl-s on it: when each session last said something.
-    ///
-    /// Two lists. The past one, whose rows are nothing BUT history, and the idle
-    /// one, where it answers "which of these did I leave waiting most recently".
-    /// On the others it would be noise: a session working or holding a question
-    /// is there because of what it is doing now, and all sessions at once is
-    /// several questions at the same time.
-    fn has_dates(self) -> bool {
-        matches!(self, Mode::Idle | Mode::Dead)
-    }
 }
 
 /// Where rows come from, and what does not change while the picker is open.
@@ -537,7 +525,7 @@ fn now() -> i64 {
 /// list keeps its own order; the sort is stable, so ties do too.
 ///
 /// By date sorts on each row's `since`, so it holds with no query as well: the
-/// idle list comes in tmux order and the past list newest first already. A row
+/// live lists come in tmux order and the past list newest first already. A row
 /// that cannot say when it last spoke (an agent that reports nothing, a host
 /// whose taimux predates the field) goes after every row that can, keeping the
 /// order it came in.
@@ -598,16 +586,7 @@ fn filter(list: &[rows::Row], query: &str, matcher: &SkimMatcherV2, by_date: boo
 
 /// What the picker says it can do. Only what is really bound: a header promising
 /// a key that does nothing is worse than a shorter one.
-///
-/// `by_date` is None on every list but the idle and past ones, the two with a
-/// date to sort by and so the only ones ctrl-s is bound on.
-fn header(
-    script: bool,
-    ended: bool,
-    search_key: bool,
-    search_on: bool,
-    by_date: Option<bool>,
-) -> String {
+fn header(script: bool, ended: bool, search_key: bool, search_on: bool, by_date: bool) -> String {
     let mut h = String::from("enter: switch");
     if ended {
         h.push_str("/resume");
@@ -620,11 +599,11 @@ fn header(
             "   ctrl-t: search text"
         });
     }
-    match by_date {
-        Some(true) => h.push_str("   ctrl-s: sort by date (on)"),
-        Some(false) => h.push_str("   ctrl-s: sort by date"),
-        None => {}
-    }
+    h.push_str(if by_date {
+        "   ctrl-s: sort by date (on)"
+    } else {
+        "   ctrl-s: sort by date"
+    });
     if script {
         // "outdated" and not "stale", which it said until the list of those rows
         // got a Tab stop of its own: two words for one thing on the same screen
@@ -798,11 +777,15 @@ struct App {
     /// ctrl-t to jump by name among the live sessions leaves the history
     /// searching what was said.
     search_past: bool,
-    /// Order the idle and past lists by when each session last said something,
-    /// newest first, rather than in their own order or ranked best match first
-    /// (loose matches still go last, see `filter`). Only those two lists read
-    /// it, being the ones with a date to go by, and it holds across Tab as
-    /// `search` does.
+    /// Order the list by when each session last said something, newest first,
+    /// rather than in its own order or ranked best match first (loose matches
+    /// still go last, see `filter`). One switch for every list, holding across
+    /// Tab as `search` does.
+    ///
+    /// It was bound on the idle and past lists alone until 2026-10-16, on the
+    /// reasoning that a session working or holding a question is listed for
+    /// what it is doing now. Patrick's call to open it up: "which of these
+    /// spoke last" is a question worth asking of any of them.
     by_date: bool,
     preview: bool,
     query: String,
@@ -1372,10 +1355,9 @@ impl App {
     }
 
     /// Whether the list on screen is in date order, newest first, rather than in
-    /// its own order or ranked best match first: the idle or past list with
-    /// ctrl-s on, and nothing else.
+    /// its own order or ranked best match first.
     fn dated(&self) -> bool {
-        self.by_date && self.mode.has_dates()
+        self.by_date
     }
 
     /// Re-lay the rows out and re-apply the query, putting the cursor back on the
@@ -1747,7 +1729,7 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
                         app.src.ended.is_some(),
                         search_enabled(),
                         app.searching(),
-                        app.mode.has_dates().then_some(app.by_date),
+                        app.dated(),
                     ),
                     Style::default().fg(Color::DarkGray),
                 ))),
@@ -1997,13 +1979,12 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
                     KeyCode::Char('t') if ctrl && search_enabled() => app.toggle_search(),
                     // By date: newest first by when each session last said
                     // something, the rows that say what was typed ahead of the
-                    // loose matches (see `filter`). Bound only on the lists with
-                    // a date to sort by (see `Mode::has_dates`), and a rebuild
-                    // rather than a re-filter so the cursor stays on the session
-                    // it was on: a second press then lands exactly where the
-                    // first one started. It arrives as a key and not as XOFF,
+                    // loose matches (see `filter`). Bound on every list, and a
+                    // rebuild rather than a re-filter so the cursor stays on the
+                    // session it was on: a second press then lands exactly where
+                    // the first one started. It arrives as a key and not as XOFF,
                     // since raw mode turns flow control off.
-                    KeyCode::Char('s') if ctrl && app.mode.has_dates() => {
+                    KeyCode::Char('s') if ctrl => {
                         app.by_date = !app.by_date;
                         app.rebuild();
                     }
@@ -2932,27 +2913,35 @@ mod tests {
         assert_eq!((on(&a), a.sel), ("dead:claude:/o.jsonl", 0));
     }
 
-    /// Only the idle and past lists sort by date. Left on through a Tab, the flag
-    /// must not quietly stop the others ranking what a query keeps.
+    /// Every list sorts by date, not only the idle and past ones it started on,
+    /// and the one switch holds through Tab: the working sessions by which spoke
+    /// last, and all of them at once the same way.
     #[test]
-    fn by_date_leaves_the_other_lists_ranked() {
-        let mut a = app("%1\ta:1.1\t/h\tclaude\t1\tidle\t-\trestart the ledger\n\
-                         %2\tb:1.1\t/h\tclaude\t1\tidle\t-\tcherry tart");
-        a.by_date = true;
+    fn ctrl_s_orders_every_list_by_the_last_message() {
+        let mut a = app("%1\ta:1.1\t/h\tclaude\t1\trun\t-\tcherry tart\t1000\n\
+                         %2\tb:1.1\t/h\tclaude\t1\tidle\t-\ttrial and error then tests\t3000\n\
+                         %3\tc:1.1\t/h\tclaude\t1\trun\t-\trestart the ledger\t2000");
         a.query = "tart".into();
         a.rebuild();
-        assert!(!a.dated(), "all sessions at once is never in date order");
-        assert_eq!(ids(&a), ["%2", "%1"], "so a query still ranks it");
-        for m in [
-            Mode::All,
-            Mode::Input,
-            Mode::Run,
-            Mode::Background,
-            Mode::Outdated,
-        ] {
-            assert!(!m.has_dates(), "{m:?}");
-        }
-        assert!(Mode::Idle.has_dates() && Mode::Dead.has_dates());
+        assert_eq!(ids(&a), ["%1", "%3", "%2"], "ranked, the word start first");
+        a.by_date = true;
+        a.rebuild();
+        assert!(a.dated(), "all sessions at once sorts too");
+        assert_eq!(ids(&a), ["%3", "%1", "%2"], "the loose match still last");
+        a.query.clear();
+        a.query_changed();
+        assert_eq!(
+            ids(&a),
+            ["%2", "%3", "%1"],
+            "and with no query, newest first"
+        );
+        a.mode = Mode::Run;
+        a.rebuild();
+        assert!(a.dated(), "the flag rides the Tab");
+        assert_eq!(ids(&a), ["%3", "%1"]);
+        a.by_date = false;
+        a.rebuild();
+        assert_eq!(ids(&a), ["%1", "%3"], "back to tmux order");
     }
 
     /// Idle sessions in tmux order, as the scan lists them, each with when it
@@ -3135,19 +3124,17 @@ mod tests {
     /// nothing is worse than a shorter header.
     #[test]
     fn the_header_advertises_only_bound_keys() {
-        let bare = header(false, false, false, false, None);
+        let bare = header(false, false, false, false, false);
         assert!(!bare.contains("ctrl-x"));
         assert!(!bare.contains("resume"));
         assert!(!bare.contains("ctrl-t"));
-        assert!(!bare.contains("ctrl-s"));
-        assert!(header(true, false, false, false, None).contains("ctrl-x"));
-        assert!(header(false, true, false, false, None).contains("enter: switch/resume"));
-        assert!(header(false, false, true, true, None).contains("(on)"));
-        assert!(!header(false, false, true, false, None).contains("(on)"));
-        // ctrl-s is bound on the past list, and only said there
-        let past = header(false, true, false, false, Some(false));
-        assert!(past.contains("ctrl-s: sort by date") && !past.contains("(on)"));
-        assert!(header(false, true, false, false, Some(true)).contains("ctrl-s: sort by date (on)"));
+        assert!(header(true, false, false, false, false).contains("ctrl-x"));
+        assert!(header(false, true, false, false, false).contains("enter: switch/resume"));
+        assert!(header(false, false, true, true, false).contains("(on)"));
+        assert!(!header(false, false, true, false, false).contains("(on)"));
+        // ctrl-s is bound on every list, so every header says it
+        assert!(bare.contains("ctrl-s: sort by date") && !bare.contains("(on)"));
+        assert!(header(false, false, false, false, true).contains("ctrl-s: sort by date (on)"));
     }
 
     #[test]

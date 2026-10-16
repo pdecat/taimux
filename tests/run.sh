@@ -1329,10 +1329,11 @@ else
   ptmux send-keys C-s 2>/dev/null
   pexpect "a second press ranks them again"    "cherry,restart,trial"
   hasnt "…and the border stops saying so"   "$(pscreen | sed -n '1p')" "by date"
-  # On to a live list, which has no date to sort by.
+  # On to a live list, which sorts by date too, and the switch is still off.
   ptmux send-keys Tab 2>/dev/null
   n=0; while [ "$n" -lt 60 ] && pscreen | sed -n '1p' | grep -q 'past sessions'; do n=$((n+1)); sleep 0.05; done
-  hasnt "a live list does not offer ctrl-s" "$(pscreen | sed -n '3p')" "ctrl-s"
+  has   "a live list offers ctrl-s too"    "$(pscreen | sed -n '3p')" "ctrl-s: sort by date"
+  hasnt "…still off"                       "$(pscreen | sed -n '3p')" "sort by date (on)"
   ptmux send-keys Escape 2>/dev/null
   n=0; while [ "$n" -lt 60 ] && ptmux has-session 2>/dev/null; do n=$((n+1)); sleep 0.05; done
   eq "…and it chose nothing"                "" "$(cat "$PT/chosen" 2>/dev/null)"
@@ -1341,13 +1342,14 @@ else
 fi
 
 # ============================================================================
-section "the idle list by date: ctrl-s orders it by the last message"
+section "the live lists by date: ctrl-s orders them by the last message"
 # ============================================================================
-# The idle list comes in tmux order. Ctrl-s puts it in the order its sessions
-# last said something, newest first, which is the question an idle list gets
-# looked at with: which of these did I leave waiting most recently. The feed
-# answers nine fields, the way the local scan does, and one row says `-` for
-# an agent that cannot say.
+# The live lists come in tmux order. Ctrl-s puts the one on screen in the order
+# its sessions last said something, newest first, which is the question an idle
+# list gets looked at with: which of these did I leave waiting most recently.
+# It is one switch for every list, so it rides the Tab. The feed answers nine
+# fields, the way the local scan does, and one row says `-` for an agent that
+# cannot say.
 ISOCK="taimux-idletest-$$"
 itmux() { tmux -f /dev/null -L "$ISOCK" "$@"; }
 if [ ! -x "$KBIN" ]; then
@@ -1388,17 +1390,19 @@ IFEED
     "TAIMUX_SELF=$IT/feed TAIMUX_SEARCH=0 TAIMUX_SESSIONS=0 TAIMUX_REMOTE=0 \
      XDG_RUNTIME_DIR=$IT/run $KBIN tui >$IT/chosen 2>$IT/err" 2>/dev/null
   iexpect "the picker opens on every session, in tmux order" "apple,banana,cherry,date,elder"
-  hasnt "…with no ctrl-s on a list with no date to sort by" "$(iscreen | sed -n '3p')" "ctrl-s"
-  # Waiting, working, then idle.
-  itmux send-keys Tab Tab Tab 2>/dev/null
-  iexpect "the idle list is the idle four, in tmux order" "apple,banana,cherry,date"
   has   "…and offers ctrl-s there"          "$(iscreen | sed -n '3p')" "ctrl-s: sort by date"
   itmux send-keys C-s 2>/dev/null
   iexpect "ctrl-s orders them by the last message, the one that cannot say last" \
-          "banana,date,apple,cherry"
+          "elder,banana,date,apple,cherry"
   has   "…the border says so"               "$(iscreen | sed -n '1p')" "by date"
+  # Waiting, working, then idle.
+  itmux send-keys Tab Tab Tab 2>/dev/null
+  iexpect "the idle list keeps the order through Tab" "banana,date,apple,cherry"
+  has   "…and says so"                      "$(iscreen | sed -n '1p')" "by date"
+  has   "…as does the header"               "$(iscreen | sed -n '3p')" "sort by date (on)"
   itmux send-keys C-s 2>/dev/null
   iexpect "a second press puts tmux order back" "apple,banana,cherry,date"
+  hasnt "…and the border stops saying so"   "$(iscreen | sed -n '1p')" "by date"
   itmux send-keys Escape 2>/dev/null
   n=0; while [ "$n" -lt 60 ] && itmux has-session 2>/dev/null; do n=$((n+1)); sleep 0.05; done
   eq "…and it chose nothing"                "" "$(cat "$IT/chosen" 2>/dev/null)"

@@ -822,7 +822,7 @@ fn state_report(id: &str) -> i32 {
             );
         }
     }
-    // What ctrl-s sorts the idle list on, so an order that looks wrong can be
+    // What ctrl-s sorts the live lists on, so an order that looks wrong can be
     // read off here the way a state that looks wrong can.
     match current.as_ref().map(|c| c.last).filter(|&t| t > 0) {
         Some(t) => println!("last said   {}", ago(t)),

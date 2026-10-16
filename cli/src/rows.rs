@@ -105,9 +105,9 @@ pub struct Row {
     /// pane is, so the preview has to ask over there rather than locally.
     pub host: String,
     /// When the session last said something, in epoch milliseconds, which is
-    /// what the idle and past lists sort on by date. None where nothing tells:
-    /// an agent other than claude, a claude with no hook line, or another host
-    /// whose taimux predates the field.
+    /// what ctrl-s sorts every list on. None where nothing tells: an agent other
+    /// than claude, a claude with no hook line, or another host whose taimux
+    /// predates the field.
     pub since: Option<i64>,
 }
 

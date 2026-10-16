@@ -171,15 +171,17 @@ The ring is short enough that the list you want is as often the one behind you a
 the one ahead, and overshooting the waiting list by one press used to cost four
 more to come back to it.
 
-**Ctrl-s** puts the idle list in the order its sessions last said something,
-newest first, and the border says `by date` while it is on: the session you left
-waiting a minute ago comes first, the one forgotten since yesterday last. "Last
-said something" is the newest turn in the session's transcript, its last message,
-and not when its hook line was written, because a resumed session rewrites that
-line with nothing said at all. Only claude reports it, so a session of any other
-agent keeps its place after every dated one, as does one on a host whose taimux
-predates the field. The same key sorts the [past list](#newest-first-or-best-match-first)
-by date, and a query keeps the order it sets.
+**Ctrl-s** puts the list on screen in the order its sessions last said
+something, newest first, and the border says `by date` while it is on: on the
+idle list the session you left waiting a minute ago comes first, the one
+forgotten since yesterday last. It is bound on every list, one switch for all of
+them that stays on through `Tab`. "Last said something" is the newest turn in the
+session's transcript, its last message, and not when its hook line was written,
+because a resumed session rewrites that line with nothing said at all. Only
+claude reports it, so a session of any other agent keeps its place after every
+dated one, as does one on a host whose taimux predates the field. The same key
+sorts the [past list](#newest-first-or-best-match-first) by date, and a query
+keeps the order it sets.
 
 The border label names the list you are looking at, and the mode is kept across a
 refresh (by hand or on the timer), so a picker left open on the waiting list is a
@@ -378,7 +380,7 @@ so far.
 
 When a row reads wrong, `taimux state <pane>` prints every input behind it: the
 hook line and its age, the newest turn record in the transcript, when the session
-last said something (what `Ctrl-s` sorts the idle list on), what the screen
+last said something (what `Ctrl-s` sorts the lists on), what the screen
 shows, and what those come to:
 
 ```
@@ -644,7 +646,7 @@ Inside the picker:
 |----------------|---------------------------------|
 | type           | filter on what each row shows, and on [what was said inside each session](#searching-what-a-session-said) |
 | `Ctrl-t`       | stop searching what was said, or start again, in the list on screen |
-| `Ctrl-s`       | in the [idle](#what-a-session-is-doing) and [past](#newest-first-or-best-match-first) lists, order by when each session last said something, newest first |
+| `Ctrl-s`       | order [any list](#what-a-session-is-doing), the [past](#newest-first-or-best-match-first) one included, by when each session last said something, newest first |
 | `↑` / `↓`      | move (wraps around at the ends) |
 | `Ctrl-j` / `Ctrl-k` | same, and `Ctrl-n` / `Ctrl-p` too |
 | `PgUp` / `PgDn`| move a screenful (stops at the ends, it does not wrap) |
@@ -1121,10 +1123,10 @@ conversation you want can sit under older ones that happen to match it more
 tightly.
 
 **`Ctrl-s`** keeps the matches in date order instead, and the border says
-`by date` while it is on. It is bound on this list and on the
-[idle](#what-a-session-is-doing) one, the two with a date worth sorting by, and
-it stays on through `Tab`, for both. The cursor stays on the conversation it was
-on, so a second press puts you back exactly where the first one started.
+`by date` while it is on. It is the same key, and the same switch, as on the
+[live lists](#what-a-session-is-doing), so it stays on through `Tab`. The cursor
+stays on the conversation it was on, so a second press puts you back exactly
+where the first one started.
 
 It is **not** "leave every match where it stands", which is what fzf's
 `--no-sort` does and what was tried first. The ranking was doing a second job
@@ -1384,7 +1386,7 @@ ssh'd into each other) possible, and it simply cannot.
 Being the wire format, it also keeps its shape. A picker keeps only rows of the
 fields it knows and says "its taimux answers in another format" for the rest, so
 `list` prints the eight every taimux reads, the ninth, when each session last
-said something (what `Ctrl-s` sorts the idle list on), only to a picker that asks
+said something (what `Ctrl-s` sorts the lists on), only to a picker that asks
 with `list --since`, and the tenth, whether a finished turn left work in flight
 (what the [background stop](#sessions-running-background-work) lists), only to
 one that asks with `--background`. A taimux too old to know a flag ignores it,
