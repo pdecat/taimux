@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/pdecat/taimux/compare/v0.22.0...v0.23.0) (2026-10-16)
+
+
+### Features
+
+* ctrl-s sorts every list by date ([8294cfa](https://github.com/pdecat/taimux/commit/8294cfada5e3260dcbbf7a6f0a02b171d426102d))
+
 ## [0.22.0](https://github.com/pdecat/taimux/compare/v0.21.2...v0.22.0) (2026-10-14)
 
 
