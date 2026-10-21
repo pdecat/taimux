@@ -27,7 +27,7 @@ description = "Shared internals for taimux: pane scanning, transcripts, agent ve
 
 [features]
 default = ["sqlite"]
-# read OpenCode's and Codex's SQLite session stores
+# read OpenCode's SQLite session store (Codex's index is left alone, see agents/codex.rs)
 sqlite = ["dep:rusqlite"]
 
 [dependencies]

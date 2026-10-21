@@ -441,7 +441,7 @@ next door instead of wherever the scan happened to start.
 Native binaries (`claude`, `codex`, `opencode`, `agy`) are matched by name.
 Node-wrapped CLIs whose process shows up as `node` (e.g. `gemini`) are matched on
 the foreground process's **full argv**, so they're detected too. To add or change
-agents, edit the `agent_of()` patterns near the top of `taimux`.
+agents, edit the `agent_of()` patterns in `core/src/panes.rs`.
 
 `claude` has a second shape, because Claude Code self-updates by writing a whole
 new binary to `~/.local/share/claude/versions/<version>` and repointing the
@@ -1615,15 +1615,16 @@ This is the seam `resurrect` is built on.
 ## How detection works
 
 For each tmux pane, `taimux` scans the processes in its terminal's **foreground
-process group** (`ps`, `pgid == tpgid`) and matches their argv against the agent
-patterns, taking the first that matches. Scanning the whole group rather than just
-its leader means an agent started by a resident launcher that stays in front
-(such as `rses` or `npx`, where the pane's leader is `node …` and the agent is
-its child) is still detected. Because headless / SDK / sub-agent invocations (e.g.
-`claude` with `--output-format` / `--print`) are never a pane foreground, they're
-excluded, as is any agent running outside tmux. Only the current tmux server is
-scanned; detection is stateless (no daemon, and nothing is cached but the version
-strings described above).
+process group** (read from `/proc`, `pgid == tpgid`) and matches their argv
+against the agent patterns, taking the first that matches. Scanning the whole
+group rather than just its leader means an agent started by a resident launcher
+that stays in front (such as `rses` or `npx`, where the pane's leader is `node …`
+and the agent is its child) is still detected. Because headless / SDK /
+sub-agent invocations (e.g. `claude` with `--output-format` / `--print`) are
+never a pane foreground, they're excluded, as is any agent running outside tmux.
+Only the current tmux server is scanned; detection is stateless (the scan runs
+again on every refresh, and nothing is cached but the version strings described
+above, which [the daemon](#the-daemon) keeps across pickers).
 
 ## Demo
 
@@ -1717,8 +1718,9 @@ The split is not about shipping more artefacts, and it does not: the installer,
 the tmux plugin, the launcher symlink and another host's ssh lookup all resolve
 exactly one name. It is about the compiler being able to say no. "The daemon
 does not link the terminal stack" used to be a claim in a comment; now
-`cargo tree -p taimux-daemon` prints two lines and nothing can quietly add a
-third.
+`cargo tree -p taimux-daemon -e normal --depth 2` prints three lines (itself,
+`core`, and the `rusqlite` behind `core`'s default feature) and nothing can quietly
+add a fourth.
 
 **The picker starts one for itself**, the way atuin's client starts its own
 daemon rather than asking you for a service file: on finding nobody listening it
