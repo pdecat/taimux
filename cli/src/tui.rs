@@ -804,6 +804,21 @@ struct App {
     view: Vec<usize>,
     sel: usize,
     shot: Option<(String, Instant, String)>,
+    /// The last screen each remote row sent back, and when.
+    ///
+    /// One per row rather than the single `shot`, because a remote screen costs
+    /// an ssh and the cursor going back over a row it has just left should not
+    /// pay for it again before showing anything.
+    remote: HashMap<String, (Instant, String)>,
+    /// The remote screen on its way, on a worker thread, and whose it is.
+    ///
+    /// The ssh used to run inside the draw, so every cursor landing on a remote
+    /// row held the keys for a round trip (0.1 s on a warm ControlMaster, the 4 s
+    /// bound on a host gone quiet), and holding an arrow down over a column of
+    /// them queued the repeats up behind it. One at a time, which is also what
+    /// coalesces a fast scroll: the rows passed over while one is out are never
+    /// asked for, and the row the cursor stops on is asked next.
+    fetching: Option<(String, Receiver<String>)>,
     /// How far the preview is scrolled from its default view, in rows, negative
     /// towards the start of the body.
     poff: i32,
@@ -983,9 +998,9 @@ impl App {
         // renders its own. That is an ssh, and the script already knows how to
         // make it: which taimux is over there, the bound it runs under, and what
         // to say when a host stops answering between the list and the cursor
-        // landing on its row. Shelling out to it is one fork per cursor landing,
-        // which is what fzf's preview cost anyway, and it beats keeping a second
-        // copy of that knowledge here.
+        // landing on its row. It beats keeping a second copy of that knowledge
+        // here, and it runs on a thread (see `fetching`), so the draw only ever
+        // shows what has already come back.
         if !host.is_empty() {
             let Some(script) = self.src.script.clone() else {
                 body.push(Line::from(Span::styled(
@@ -994,24 +1009,21 @@ impl App {
                 )));
                 return (out, body, false);
             };
-            let fresh = matches!(&self.shot, Some((k, at, _))
-                                 if *k == id && at.elapsed() < REMOTE_TTL);
+            self.take_remote();
+            let fresh = matches!(self.remote.get(&id), Some((at, _)) if at.elapsed() < REMOTE_TTL);
             if !fresh {
-                let text = Command::new(&script)
-                    .args(["preview", &id])
-                    .output()
-                    .ok()
-                    .filter(|o| o.status.success())
-                    .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-                    .unwrap_or_default();
-                self.shot = Some((id.clone(), Instant::now(), text));
+                self.fetch_remote(&script, &id);
             }
-            let text = self
-                .shot
-                .as_ref()
-                .map(|(_, _, s)| s.clone())
-                .unwrap_or_default();
-            body.extend(tail(&text, usize::MAX));
+            // A row seen before shows what it showed last while the new screen
+            // is out: a tenth of a second of an older screen reads better than a
+            // blank one flashing in between.
+            match self.remote.get(&id) {
+                Some((_, text)) => body.extend(tail(text, usize::MAX)),
+                None => body.push(Line::from(Span::styled(
+                    format!("asking {}…", host),
+                    Style::default().fg(Color::DarkGray),
+                ))),
+            }
             return (out, body, true);
         }
         let fresh = matches!(&self.shot, Some((k, at, _))
@@ -1298,6 +1310,44 @@ impl App {
                 self.pending = None;
                 false
             }
+        }
+    }
+
+    /// Ask for a remote row's screen on a worker thread, unless one is already
+    /// out. The draw asks again once that one lands, for whichever row the cursor
+    /// is on by then.
+    fn fetch_remote(&mut self, script: &str, id: &str) {
+        if self.fetching.is_some() {
+            return;
+        }
+        let (script, which) = (script.to_string(), id.to_string());
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let text = Command::new(&script)
+                .args(["preview", &which])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+                .unwrap_or_default();
+            let _ = tx.send(text);
+        });
+        self.fetching = Some((id.to_string(), rx));
+    }
+
+    /// Keep a remote screen that has landed. A thread that died without
+    /// answering is forgotten, as a refresh is, and the next draw asks again.
+    fn take_remote(&mut self) {
+        let Some((id, rx)) = &self.fetching else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok(text) => {
+                self.remote.insert(id.clone(), (Instant::now(), text));
+                self.fetching = None;
+            }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => self.fetching = None,
         }
     }
 
@@ -1613,6 +1663,8 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
         view: Vec::new(),
         sel: 0,
         shot: None,
+        remote: HashMap::new(),
+        fetching: None,
         poff: 0,
         poff_for: String::new(),
         pending: None,
@@ -1864,7 +1916,10 @@ pub fn run(src: Source) -> std::io::Result<Outcome> {
             ticked = Instant::now();
             app.start_refresh();
         }
-        if !event::poll(Duration::from_millis(120))? {
+        // Sooner while a remote screen is out, since nothing else wakes the loop
+        // to draw it: the 120 ms would be more than the ssh it is waiting on.
+        let wait = if app.fetching.is_some() { 20 } else { 120 };
+        if !event::poll(Duration::from_millis(wait))? {
             continue;
         }
         match event::read()? {
@@ -2179,6 +2234,8 @@ mod tests {
             view: Vec::new(),
             sel: 0,
             shot: None,
+            remote: HashMap::new(),
+            fetching: None,
             poff: 0,
             poff_for: String::new(),
             pending: None,
@@ -2318,6 +2375,79 @@ mod tests {
         }
         assert!(a.pending.is_none(), "still waiting on a dead thread");
         assert_eq!(a.all.len(), 3, "and the list it had is untouched");
+    }
+
+    fn body_text(a: &mut App) -> String {
+        let (_, body, _) = a.preview();
+        body.iter()
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// A remote row's screen is an ssh, and it used to be fetched inside the
+    /// draw: every cursor landing on a remote row held the keys for a round
+    /// trip. The draw now only shows what has come back, a fast scroll asks
+    /// for one screen rather than one per row passed over, and the row the
+    /// cursor stops on is the one asked next.
+    #[test]
+    fn a_remote_preview_never_holds_up_the_draw() {
+        let d = std::env::temp_dir().join(format!("taimux-tui-remote-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let script = d.join("taimux");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\necho \"$2\" >> {}\nsleep 0.3\necho \"screen of $2\"\n",
+                d.join("asked").display()
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let mut a = app("ha:%1\tw:1.1\t/h/a\tclaude\t1\tidle\t-\tone\n\
+                         ha:%2\tw:1.2\t/h/b\tclaude\t1\tidle\t-\ttwo\n\
+                         ha:%3\tw:1.3\t/h/c\tclaude\t1\tidle\t-\tthree");
+        a.src.script = Some(script.display().to_string());
+        let asked = || std::fs::read_to_string(d.join("asked")).unwrap_or_default();
+
+        let at = Instant::now();
+        assert_eq!(body_text(&mut a), "asking ha…");
+        a.move_by(1);
+        assert_eq!(body_text(&mut a), "asking ha…");
+        a.move_by(1);
+        assert_eq!(body_text(&mut a), "asking ha…");
+        assert!(
+            at.elapsed() < Duration::from_millis(200),
+            "three draws over remote rows took {:?}",
+            at.elapsed()
+        );
+
+        let wait_for = |a: &mut App, want: &str| {
+            for _ in 0..100 {
+                let b = body_text(a);
+                if b == want {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            panic!("never showed {:?}", want);
+        };
+        wait_for(&mut a, "screen of ha:%3");
+        assert_eq!(asked(), "ha:%1\nha:%3\n", "%2 was only passed over");
+
+        // Back over a row already fetched shows it straight away.
+        a.move_by(-2);
+        assert_eq!(body_text(&mut a), "screen of ha:%1");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// The border says so, but only once it has been a second: on a healthy
