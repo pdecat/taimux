@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.1](https://github.com/pdecat/taimux/compare/v0.23.0...v0.23.1) (2026-10-30)
+
+
+### Bug fixes
+
+* draw a remote row's preview without waiting on its ssh ([f1bf255](https://github.com/pdecat/taimux/commit/f1bf25536c1c565122c4b44d3b7ac86c03ac8061))
+
 ## [0.23.0](https://github.com/pdecat/taimux/compare/v0.22.0...v0.23.0) (2026-10-16)
 
 
