@@ -367,6 +367,15 @@ pub struct Input<'a> {
     /// `restart` asks on top of the state, and a session that has started a new
     /// turn since can still have that work running.
     pub background: bool,
+    /// Keep the rows `background` would as well, whatever their state, on top
+    /// of the ones `only` keeps.
+    ///
+    /// What the working list asks for: a shell or a subagent a turn left running
+    /// is work still going on, and the list of what is busy is where you look
+    /// for it, even though the turn that started it is over and the row reads as
+    /// idle. Only the list grows: the row keeps its state and its marker, so it
+    /// still shows as idle in it.
+    pub with_background: bool,
     pub query: &'a str,
     /// pane id to the snippet of what that session said, when searching.
     ///
@@ -406,12 +415,13 @@ pub fn build(lines: &str, input: &Input) -> Vec<Row> {
             continue;
         }
         let state = f[5];
-        if !input.only.is_empty() && state != input.only {
-            continue;
-        }
         // Nothing at all is "not known", which is every row from a host whose
         // taimux predates the field, and so is anything other than `bg`.
-        if input.background && f.get(9) != Some(&"bg") {
+        let bg = f.get(9) == Some(&"bg");
+        if !input.only.is_empty() && state != input.only && !(input.with_background && bg) {
+            continue;
+        }
+        if input.background && !bg {
             continue;
         }
         let (id, target, cwd) = (f[0], f[1], f[2]);
@@ -1057,6 +1067,30 @@ mod tests {
         );
         assert_eq!(all.len(), 5);
         assert_eq!(r[0].plain(), all[0].plain());
+    }
+
+    /// `with_background` widens one state to the rows with work in flight, in
+    /// their own order and with their own marker: the idle one still shows none.
+    /// A row from a host that cannot say stays out, as it does of the background
+    /// list.
+    #[test]
+    fn one_state_plus_the_rows_with_work_in_flight() {
+        let lines = "%1\ta:1.1\t/home/p\tclaude\t2.1\tidle\t-\twatching\t-\tbg\n\
+                     %2\tb:1.1\t/home/p\tclaude\t2.1\tidle\t-\tnothing left\t-\t-\n\
+                     %3\tc:1.1\t/home/p\tclaude\t2.1\trun\t-\tbusy\t-\t-\n\
+                     ha:%4\td:1.1\t/home/p\tclaude\t2.1\tidle\t-\tolder host\t-";
+        let input = |with_background| Input {
+            width: 100,
+            only: "run",
+            with_background,
+            ..Default::default()
+        };
+        let ids = |r: &[Row]| r.iter().map(|r| r.pane_id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&build(lines, &input(false))), ["%3"]);
+        let r = build(lines, &input(true));
+        assert_eq!(ids(&r), ["%1", "%3"]);
+        assert!(!r[0].plain().contains('◐'), "{}", r[0].plain());
+        assert!(r[1].plain().contains('◐'), "{}", r[1].plain());
     }
 
     #[test]

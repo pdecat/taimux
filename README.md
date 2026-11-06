@@ -96,7 +96,7 @@ The column before the summary answers it, in three states:
 |---|---|
 | `✳` | **waiting for an answer**, the one worth looking for (and the only one in colour) |
 | `◐` | working: a turn is in flight |
-| blank | idle at the prompt, background work included: a turn that left a shell running is over, and Tab's [background stop](#sessions-running-background-work) is where those are found |
+| blank | idle at the prompt, background work included: a turn that left a shell running is over, so its row stays blank, but the working list and Tab's [background stop](#sessions-running-background-work) both hold it |
 
 The column is two wide whichever it is, so every summary starts in the same place.
 
@@ -134,8 +134,9 @@ is the only reading there is:
   flight. It reads as **idle**: the session will wake itself when that work
   reports back, but until then its prompt is as free as any other. It used to
   read as working, and one pane whose two watchers were due to report at 19:00
-  and 19:25 would have sat in the working list for two and a half hours at an
-  empty prompt. The work still counts, where it matters: see `bg` below;
+  and 19:25 would have been marked working for two and a half hours at an empty
+  prompt. The work still counts, where it matters: the working list holds such a
+  session, unmarked, and see `bg` below;
 - **over**: that finished line, or `⎿  Interrupted · What should Claude do
   instead?`, which is all an interrupted reply leaves behind;
 - **idle**: the prompt box, but only the live one, the `❯` with a rule directly
@@ -1042,6 +1043,13 @@ Like the outdated stop below it, this one is **not a state**, and it crosses
 the states above it: the work outlives the turn that started it, so a session
 that has taken a new prompt since is working *and* still has that shell going.
 Left open, it empties itself as each piece of work reports back.
+
+The working stop holds these rows as well, whatever their state, since the
+list of what is busy is where you look for work still going on. They keep
+their own marker there, blank for an idle one, and the list is named for both
+halves, `working or running background work`. They leave it as their work
+reports back, as they leave this one, and the idle list still holds the idle
+ones, since their state has not changed.
 
 Only Claude Code says what it left running, so a session of any other agent is
 never in this list, and neither is one on a [host](#sessions-on-other-hosts)

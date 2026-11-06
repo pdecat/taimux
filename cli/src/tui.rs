@@ -69,6 +69,10 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 /// far end, in that order, rather than between two states of a running session.
 /// Background comes first of them because it is nearest to idle, where most of
 /// its rows are.
+///
+/// Run is the one state list that also takes rows outside its state: the
+/// sessions Background lists, since work a finished turn left running is still
+/// work going on, and the working list is where you look for what is busy.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
     All,
@@ -88,7 +92,8 @@ impl Mode {
     /// that filter rides on `Input::outdated` instead. Background is empty for
     /// the same reason, and rides on `Input::background`: a turn that left a
     /// shell running is idle, and one started since can be working with that
-    /// shell still going.
+    /// shell still going. Run's filter is widened by that same flag, as
+    /// `Input::with_background`, so its idle rows with work in flight come too.
     fn filter(self) -> &'static str {
         match self {
             Mode::All => "",
@@ -105,7 +110,9 @@ impl Mode {
         match self {
             Mode::All => "agent sessions",
             Mode::Input => "waiting for an answer",
-            Mode::Run => "working",
+            // Says what else is in it, since those rows keep their idle marker
+            // and would otherwise read as having strayed into the wrong list.
+            Mode::Run => "working or running background work",
             Mode::Idle => "idle at the prompt",
             Mode::Background => "running background work",
             Mode::Outdated => "running outdated code",
@@ -1449,6 +1456,9 @@ impl App {
                 // the next refresh, so the list empties itself as the outdated
                 // one does.
                 background: mode == Mode::Background,
+                // The working list takes those rows too, and loses them the same
+                // way as their work reports back.
+                with_background: mode == Mode::Run,
                 query: &self.query,
                 snips: self.snippets(mode),
                 // A live pane can publish no title at all: claude sets one at a
@@ -3215,6 +3225,33 @@ mod tests {
         a.tsv = a.tsv.replace("watching ci\t-\tbg", "watching ci\t-\t-");
         a.rebuild();
         assert_eq!(ids(&a), ["%3"]);
+    }
+
+    /// The working list holds the working sessions and, in the same tmux order,
+    /// the idle ones with work in flight; the idle list keeps those too, since
+    /// their state has not changed.
+    #[test]
+    fn the_working_mode_takes_the_sessions_with_work_in_flight_too() {
+        let mut a = app("%1\ta:1.1\t/h\tclaude\t1\tidle\t-\twatching ci\t-\tbg\n\
+                         %2\tb:1.1\t/h\tclaude\t1\tidle\t-\tall done\t-\t-\n\
+                         %3\tc:1.1\t/h\tclaude\t1\trun\t-\tbusy\t-\t-\n\
+                         %4\td:1.1\t/h\tclaude\t1\tinput\t-\tasking\t-\tbg\n\
+                         %5\te:1.1\t/h\tcodex\t1\trun\t-\tcannot say");
+        a.mode = Mode::Run;
+        a.rebuild();
+        assert_eq!(ids(&a), ["%1", "%3", "%4", "%5"]);
+        assert_eq!(
+            label(Mode::Run, false, false, false, false),
+            " working or running background work "
+        );
+        a.mode = Mode::Idle;
+        a.rebuild();
+        assert_eq!(ids(&a), ["%1", "%2"], "still idle, so still here");
+        // …and once that work has reported back it is only idle
+        a.mode = Mode::Run;
+        a.tsv = a.tsv.replace("watching ci\t-\tbg", "watching ci\t-\t-");
+        a.rebuild();
+        assert_eq!(ids(&a), ["%3", "%4", "%5"]);
     }
 
     const VERSIONS: &str = "%1\ta:1.1\t/h\tclaude\t2.1.229\tidle\t-\tbehind\n\

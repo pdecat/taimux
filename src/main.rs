@@ -1515,10 +1515,12 @@ fn main() {
                 home: &home,
                 newver: &newver,
                 only: &only,
-                // What the picker's outdated and background stops pass, so this
-                // entry point can still express every list the picker can draw.
+                // What the picker's outdated, background and working stops pass,
+                // so this entry point can still express every list the picker
+                // can draw.
                 outdated: a.iter().any(|x| x == "--outdated"),
                 background: a.iter().any(|x| x == "--background"),
+                with_background: a.iter().any(|x| x == "--with-background"),
                 query: &query,
                 snips: pairs("TAIMUX_SNIPS"),
                 ptitles: pairs("TAIMUX_PTITLES"),
