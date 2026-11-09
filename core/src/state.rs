@@ -133,6 +133,51 @@ pub fn box_label(screen: &str) -> Option<String> {
     (!label.is_empty()).then(|| label.to_string())
 }
 
+/// The permission mode the footer under the live prompt box names, in the
+/// spelling hook payloads and transcripts use, which `--permission-mode` takes.
+///
+/// The one witness of a `shift+tab` at an idle prompt. Measured on 2.1.319, a
+/// flip there fires no hook and writes nothing to the transcript, so the hook
+/// line and the transcript's last `permission-mode` record both go on naming the
+/// mode of the last turn, and only this line moves:
+///
+/// ```text
+/// ────────────────────────
+/// ❯
+/// ────────────────────────
+///  O5.5/xh v2.1.319 [███░░] 13%          <- a status line, when one is set
+///  ⏵⏵ auto mode on (shift+tab to cycle) · ← 13 agents
+/// ```
+///
+/// Read only BELOW the box's closing rule, so neither the conversation nor a
+/// draft in the box can be mistaken for it, and only at the start of a line once
+/// its glyph is stripped, so a status line cannot either. Older versions drew no
+/// label in default mode and showed `? for shortcuts` there instead, which no
+/// other mode shows, so that line on its own is default too. A screen that names
+/// nothing (a dialog over the box, a redraw that left the footer blank, a mode
+/// this does not know) is `None`, which leaves the caller to the hook line.
+pub fn mode_on_screen(screen: &str) -> Option<&'static str> {
+    const LABELS: [(&str, &str); 5] = [
+        ("manual mode on", "default"),
+        ("accept edits on", "acceptEdits"),
+        ("plan mode on", "plan"),
+        ("auto mode on", "auto"),
+        ("bypass permissions on", "bypassPermissions"),
+    ];
+    let lines: Vec<&str> = screen.lines().collect();
+    let at = live_box(&lines)?;
+    let rule = (at + 1..lines.len()).find(|&i| is_rule(lines[i]))?;
+    let mut shortcuts = false;
+    for l in &lines[rule + 1..] {
+        let t = l.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '?');
+        if let Some((_, mode)) = LABELS.iter().find(|(label, _)| t.starts_with(label)) {
+            return Some(mode);
+        }
+        shortcuts |= t.starts_with("? for shortcuts");
+    }
+    shortcuts.then_some("default")
+}
+
 /// What the turn line above the prompt box says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Turn {
@@ -873,5 +918,80 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The footers 2.1.319 draws for each mode `shift+tab` cycles through, as
+    /// captured off a probe session, each read back in the spelling
+    /// `--permission-mode` takes.
+    #[test]
+    fn the_footer_names_the_permission_mode() {
+        let at = |footer: &str| format!("conversation\n{RULE}\n❯ \n{RULE}\n{footer}\n\n\n");
+        for (footer, mode) in [
+            (
+                "  ⏸ manual mode on · ? for shortcuts · ← 13 agents",
+                "default",
+            ),
+            (
+                "  ⏵⏵ accept edits on (shift+tab to cycle) · ← 13 agents",
+                "acceptEdits",
+            ),
+            (
+                "  ⏸ plan mode on (shift+tab to cycle) · ← 13 agents",
+                "plan",
+            ),
+            (
+                "  ⏵⏵ auto mode on (shift+tab to cycle) · ← 13 agents",
+                "auto",
+            ),
+            (
+                "  ⏵⏵ bypass permissions on (shift+tab to cycle)",
+                "bypassPermissions",
+            ),
+            // an older version, default mode: no label, only the hint
+            ("  ? for shortcuts", "default"),
+            // mid-turn the hint gives way and the label stays
+            ("  ⏸ manual mode on · esc to interrupt", "default"),
+        ] {
+            assert_eq!(mode_on_screen(&at(footer)), Some(mode), "{footer}");
+        }
+        // the shared fixture is a manual-mode screen too
+        assert_eq!(mode_on_screen(&at_prompt("output")), Some("default"));
+    }
+
+    /// A status line sits between the rule and the mode, and says nothing about it.
+    #[test]
+    fn a_status_line_above_the_mode_is_read_past() {
+        let s = format!(
+            "out\n{RULE}\n❯ \n{RULE}\n O5.5/xh v2.1.319 [███░░] 13% 5h 14%\n ⏵⏵ auto mode on (shift+tab to cycle)\n"
+        );
+        assert_eq!(mode_on_screen(&s), Some("auto"));
+    }
+
+    /// Only the footer counts: the same words in the conversation, a draft, or a
+    /// status line that merely mentions a mode are not the footer.
+    #[test]
+    fn the_mode_is_read_off_the_footer_and_nowhere_else() {
+        let quoted = format!(
+            "⏵⏵ plan mode on (shift+tab to cycle)\n{RULE}\n❯ \n{RULE}\n  ⏵⏵ auto mode on\n"
+        );
+        assert_eq!(mode_on_screen(&quoted), Some("auto"));
+        let draft =
+            format!("out\n{RULE}\n❯ first line\n  plan mode on\n{RULE}\n  ⏵⏵ auto mode on\n");
+        assert_eq!(mode_on_screen(&draft), Some("auto"));
+        let status = format!("out\n{RULE}\n❯ \n{RULE}\n proj · last: plan mode on\n");
+        assert_eq!(mode_on_screen(&status), None);
+    }
+
+    /// Nothing named is no answer, never a guess: a footer a redraw left blank
+    /// (seen on a live 213x11 pane), a box with no closing rule, no box at all.
+    #[test]
+    fn a_footer_that_names_nothing_is_no_answer() {
+        assert_eq!(
+            mode_on_screen(&format!("out\n{RULE}\n❯ \n{RULE}\n\n\n")),
+            None
+        );
+        assert_eq!(mode_on_screen(&format!("out\n{RULE}\n❯ \n")), None);
+        assert_eq!(mode_on_screen("some output\n❯ \n"), None);
+        assert_eq!(mode_on_screen(DIALOG), None);
     }
 }

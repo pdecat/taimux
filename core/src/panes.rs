@@ -372,14 +372,19 @@ pub fn wire(rows: &str, fields: usize) -> String {
 /// what the session says about itself, else the hook line brought up to date by
 /// the transcript, then the screen. For the callers that ask about a pane at a
 /// time, `print-cmds` and `resurrect`.
-pub fn state_of(id: &str, pid: i32) -> crate::state::State {
+///
+/// With it, off the same capture, the permission mode the session is in now
+/// (`conv::current_mode`), which those two replay on the command line.
+pub fn look(id: &str, pid: i32) -> (crate::state::State, Option<String>) {
     let screen = crate::tmux::capture(id).unwrap_or_default();
     let hook = crate::hook::current(id, pid);
-    crate::state::reading(
+    let state = crate::state::reading(
         &screen,
         crate::status::of(pid, &|| screen.clone()).and_then(|o| o.state()),
         hook.as_ref().map(|e| e.state.as_str()),
-    )
+    );
+    let mode = crate::conv::current_mode(&screen, hook.as_ref().map(|e| e.mode.as_str()));
+    (state, mode)
 }
 
 pub fn agent_rows() -> String {

@@ -336,6 +336,11 @@ pub trait Env {
         None
     }
     fn hook_state(&self, pane: &str, pid: i32) -> Option<String>;
+    /// The permission mode on the session's hook line, the one its last turn
+    /// ran in. `None` by default, and for every fixture that predates it.
+    fn hook_mode(&self, _pane: &str, _pid: i32) -> Option<String> {
+        None
+    }
     /// What the session says it is doing, Claude Code's own status
     /// (`status::of`), which outranks the hook line wherever there is one.
     /// `None` by default, and for every fixture that predates it.
@@ -535,7 +540,11 @@ pub fn plan(
         }
         claimed.insert(transcript.clone(), id.to_string());
 
-        let Some(cmd) = conv::build_cmd(&e.argv_of(pid), &transcript, &ccwd, cwd) else {
+        // The mode it is in now, which a plain resume would not bring back: the
+        // footer of the screen read above, else the mode of its last turn.
+        let mode = conv::current_mode(&screen, e.hook_mode(id, pid).as_deref());
+        let Some(cmd) = conv::build_cmd(&e.argv_of(pid), &transcript, &ccwd, cwd, mode.as_deref())
+        else {
             p.skipped
                 .push(format!("{} {}  {}, could not read its argv", id, tgt, ver));
             continue;
@@ -662,6 +671,9 @@ impl Env for Live {
     }
     fn hook_state(&self, pane: &str, pid: i32) -> Option<String> {
         taimux_core::hook::hook_state_of(pane, pid)
+    }
+    fn hook_mode(&self, pane: &str, pid: i32) -> Option<String> {
+        taimux_core::hook::hook_entry(pane, pid).map(|e| e.mode)
     }
     fn own_state(&self, pid: i32, screen: &str) -> Option<state::State> {
         taimux_core::status::of(pid, &|| screen.to_string()).and_then(|o| o.state())
@@ -1202,6 +1214,8 @@ mod plan_tests {
         zooms: std::cell::Cell<usize>,
         /// pane -> the hook line's state, for the panes that have one
         hooks: HashMap<String, String>,
+        /// pane -> the hook line's permission mode
+        modes: HashMap<String, String>,
         /// pid -> what the session says it is doing, for the ones that say
         own: HashMap<i32, state::State>,
         /// pid -> the background session it shows: its id, its worker's
@@ -1224,6 +1238,9 @@ mod plan_tests {
         }
         fn hook_state(&self, pane: &str, _pid: i32) -> Option<String> {
             self.hooks.get(pane).cloned()
+        }
+        fn hook_mode(&self, pane: &str, _pid: i32) -> Option<String> {
+            self.modes.get(pane).cloned()
         }
         fn own_state(&self, pid: i32, _screen: &str) -> Option<state::State> {
             self.own.get(&pid).copied()
@@ -1276,6 +1293,7 @@ mod plan_tests {
             zoomed: HashMap::new(),
             zooms: std::cell::Cell::new(0),
             hooks: HashMap::new(),
+            modes: HashMap::new(),
             own: HashMap::new(),
             away: HashMap::new(),
             transcript: r#"{"type":"user","timestamp":"2020-01-01T00:00:00Z"}"#.to_string(),
@@ -1309,6 +1327,44 @@ mod plan_tests {
         assert_eq!(p.go[0].cmd, "command claude --resume /t/a.jsonl");
         assert_eq!(p.go[0].via, "2.1.100 -> 2.1.258, pane map, idle");
         assert!(p.skipped.is_empty());
+    }
+
+    /// A session comes back in the mode it is in, not the one it was launched
+    /// in: a plain resume starts in the startup default, which put every pane
+    /// flipped to auto back in manual. The footer is read first, because a
+    /// `shift+tab` at an idle prompt moves nothing else, the hook line included.
+    #[test]
+    fn a_session_comes_back_in_the_mode_it_is_in() {
+        let rule = "────────────────────────────────";
+        let mut e = fake();
+        e.screens.insert(
+            "%1".into(),
+            format!("some output\n{rule}\n❯ \n{rule}\n  ⏵⏵ accept edits on (shift+tab to cycle)\n"),
+        );
+        e.modes.insert("%1".into(), "auto".into()); // its last turn's
+        let p = plan_of(&e, &opts());
+        assert_eq!(p.go.len(), 1, "{:?}", p.skipped);
+        assert_eq!(
+            p.go[0].cmd,
+            "command claude --permission-mode acceptEdits --resume /t/a.jsonl"
+        );
+
+        // a footer that names nothing leaves it to the hook line
+        let mut e = fake();
+        e.modes.insert("%1".into(), "plan".into());
+        let p = plan_of(&e, &opts());
+        assert_eq!(
+            p.go[0].cmd,
+            "command claude --permission-mode plan --resume /t/a.jsonl"
+        );
+
+        // and a line that has heard no mode yet leaves the argv as it is
+        let mut e = fake();
+        e.modes.insert("%1".into(), "-".into());
+        assert_eq!(
+            plan_of(&e, &opts()).go[0].cmd,
+            "command claude --resume /t/a.jsonl"
+        );
     }
 
     /// The rendered plan is the whole user interface of `restart -n`, so its

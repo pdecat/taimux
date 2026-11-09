@@ -64,10 +64,11 @@ fn resurrect_main(file: &str, dry: bool, verbose: bool) -> i32 {
     ]) else {
         return 1;
     };
-    let state_of = |id: &str, pid: i32| -> String {
-        taimux_core::panes::state_of(id, pid).as_str().to_string()
+    let look = |id: &str, pid: i32| -> (String, Option<String>) {
+        let (state, mode) = taimux_core::panes::look(id, pid);
+        (state.as_str().to_string(), mode)
     };
-    let records = taimux_core::conv::print_cmds(&taimux_core::panes::agent_rows(), &state_of);
+    let records = taimux_core::conv::print_cmds(&taimux_core::panes::agent_rows(), &look);
     let Ok(save) = std::fs::read_to_string(path) else {
         return 1;
     };
@@ -1209,12 +1210,13 @@ fn main() {
             // reports the screen-and-hook reading (input / run / idle) rather
             // than the title glyph: one busy taxonomy in the tool instead of two
             // that drift apart, which is what the ccrestart absorption was for.
-            let state_of = |id: &str, pid: i32| -> String {
-                taimux_core::panes::state_of(id, pid).as_str().to_string()
+            let look = |id: &str, pid: i32| -> (String, Option<String>) {
+                let (state, mode) = taimux_core::panes::look(id, pid);
+                (state.as_str().to_string(), mode)
             };
             print!(
                 "{}",
-                taimux_core::conv::print_cmds(&taimux_core::panes::agent_rows(), &state_of)
+                taimux_core::conv::print_cmds(&taimux_core::panes::agent_rows(), &look)
             );
             0
         }

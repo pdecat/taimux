@@ -583,6 +583,35 @@ pub fn resolve(pane: &str, cwd: &str, title: &str, pid: i32) -> Result<Resolved,
     ))
 }
 
+/// The values `--permission-mode` takes, in the spelling hook payloads and
+/// transcripts use. `default` is what 2.1.319's own help calls `manual`, and it
+/// still takes `default`, which is the spelling every source here reports. A
+/// hook line's `-` (no mode heard yet) or anything else is no mode at all,
+/// since a value claude refuses would leave the pane at a shell.
+pub const MODES: [&str; 7] = [
+    "default",
+    "manual",
+    "acceptEdits",
+    "plan",
+    "auto",
+    "bypassPermissions",
+    "dontAsk",
+];
+
+/// The permission mode a session is in now, for `build_cmd`.
+///
+/// The footer first, since it is the only thing a `shift+tab` at an idle prompt
+/// moves (`state::mode_on_screen`), and a restart only ever acts on an idle pane
+/// with no dialog over it, which is exactly when the footer can be read. Then the
+/// hook line's mode, which is the mode of the session's last turn: right unless
+/// it was flipped since, and the screen would have said so. Neither is `None`,
+/// and the argv's own launch mode stands.
+pub fn current_mode(screen: &str, hook_mode: Option<&str>) -> Option<String> {
+    crate::state::mode_on_screen(screen)
+        .or_else(|| hook_mode.filter(|m| MODES.contains(m)))
+        .map(str::to_string)
+}
+
 /// The command line that puts this pane's session back.
 ///
 /// Everything the live argv carries is replayed EXCEPT the three shapes that
@@ -597,14 +626,52 @@ pub fn resolve(pane: &str, cwd: &str, title: &str, pid: i32) -> Result<Resolved,
 ///
 /// `command claude`, so no shell alias fires and tmux-resurrect can read the argv
 /// back later.
-pub fn build_cmd(argv: &[String], transcript: &str, ccwd: &str, panepath: &str) -> Option<String> {
+///
+/// `mode` is the permission mode the session is in NOW (`current_mode`), and
+/// when there is one it replaces whatever the argv launched it in. A resume does
+/// not bring the mode back by itself: measured on 2.1.319, a session left in
+/// accept-edits mode and resumed with a plain `--resume` came back in the
+/// startup default, which for a `defaultMode: "default"` user put every session
+/// that had been flipped to auto back in manual. So:
+///
+/// - `--permission-mode <m>` (or `=<m>`) from the launch goes, and the current
+///   mode goes on the end instead;
+/// - `--dangerously-skip-permissions` stays only for a session still in
+///   bypass mode. Any other mode gets `--allow-dangerously-skip-permissions`
+///   in its place, which keeps bypass on the `shift+tab` cycle without
+///   starting in it, rather than leaving two flags to argue over which mode
+///   the session starts in.
+///
+/// `None` replays the argv as it stands, launch mode and all.
+pub fn build_cmd(
+    argv: &[String],
+    transcript: &str,
+    ccwd: &str,
+    panepath: &str,
+    mode: Option<&str>,
+) -> Option<String> {
     if argv.is_empty() {
         return None;
     }
+    let mode = mode.filter(|m| MODES.contains(m));
     let mut keep: Vec<&str> = Vec::new();
     let mut i = 1;
     while i < argv.len() {
         match argv[i].as_str() {
+            "--permission-mode" if mode.is_some() => {
+                if i + 1 < argv.len() && !argv[i + 1].starts_with('-') {
+                    i += 1;
+                }
+            }
+            m if mode.is_some() && m.starts_with("--permission-mode=") => {}
+            "--dangerously-skip-permissions" if mode.is_some_and(|m| m != "bypassPermissions") => {
+                if !argv
+                    .iter()
+                    .any(|a| a == "--allow-dangerously-skip-permissions")
+                {
+                    keep.push("--allow-dangerously-skip-permissions");
+                }
+            }
             "-c" | "--continue" | "--fork-session" => {}
             "attach" => {
                 let claims = i == 1 && i + 1 < argv.len() && !argv[i + 1].starts_with('-');
@@ -622,6 +689,9 @@ pub fn build_cmd(argv: &[String], transcript: &str, ccwd: &str, panepath: &str) 
             other => keep.push(other),
         }
         i += 1;
+    }
+    if let Some(m) = mode {
+        keep.extend(["--permission-mode", m]);
     }
     let mut cmd = String::from("command claude");
     for a in keep {
@@ -736,6 +806,7 @@ mod ladder_tests {
             "/new.jsonl",
             "/w",
             "/w",
+            None,
         )
         .expect("cmd");
         assert_eq!(cmd, "command claude --model opus --resume /new.jsonl");
@@ -752,6 +823,7 @@ mod ladder_tests {
             "/new.jsonl",
             "/w",
             "/w",
+            None,
         )
         .expect("cmd");
         assert_eq!(cmd, "command claude --resume /new.jsonl");
@@ -764,11 +836,13 @@ mod ladder_tests {
             "/t.jsonl",
             "/w",
             "/w",
+            None,
         )
         .expect("cmd");
         assert_eq!(cmd, "command claude --resume /t.jsonl");
         // …but the word elsewhere is an ordinary argument
-        let cmd = build_cmd(&v(&["claude", "--print", "attach"]), "", "/w", "/w").expect("cmd");
+        let cmd =
+            build_cmd(&v(&["claude", "--print", "attach"]), "", "/w", "/w", None).expect("cmd");
         assert_eq!(cmd, "command claude --print attach");
     }
 
@@ -776,23 +850,118 @@ mod ladder_tests {
     /// shell will land, since the pane's own path is where a new shell starts.
     #[test]
     fn a_cd_is_added_only_when_the_directories_differ() {
-        let same = build_cmd(&v(&["claude"]), "", "/w", "/w").expect("cmd");
+        let same = build_cmd(&v(&["claude"]), "", "/w", "/w", None).expect("cmd");
         assert_eq!(same, "command claude");
-        let diff = build_cmd(&v(&["claude"]), "", "/w/sub", "/w").expect("cmd");
+        let diff = build_cmd(&v(&["claude"]), "", "/w/sub", "/w", None).expect("cmd");
         assert_eq!(diff, "cd /w/sub && command claude");
     }
 
     #[test]
     fn an_argument_needing_quotes_gets_them() {
-        let cmd = build_cmd(&v(&["claude", "--prompt", "two words"]), "", "/w", "/w").expect("cmd");
+        let cmd = build_cmd(
+            &v(&["claude", "--prompt", "two words"]),
+            "",
+            "/w",
+            "/w",
+            None,
+        )
+        .expect("cmd");
         assert_eq!(cmd, "command claude --prompt 'two words'");
     }
 
     #[test]
     fn no_argv_is_no_command() {
-        assert!(build_cmd(&[], "/t.jsonl", "/w", "/w").is_none());
+        assert!(build_cmd(&[], "/t.jsonl", "/w", "/w", None).is_none());
+    }
+
+    /// The mode the session is in now goes on the end, and the one it was
+    /// launched in goes, in either spelling.
+    #[test]
+    fn the_current_mode_replaces_the_launch_mode() {
+        let cmd = build_cmd(&v(&["claude"]), "/t.jsonl", "/w", "/w", Some("auto")).expect("cmd");
+        assert_eq!(
+            cmd,
+            "command claude --permission-mode auto --resume /t.jsonl"
+        );
+
+        for launched in [
+            v(&["claude", "--permission-mode", "plan", "--model", "opus"]),
+            v(&["claude", "--permission-mode=plan", "--model", "opus"]),
+        ] {
+            let cmd =
+                build_cmd(&launched, "/t.jsonl", "/w", "/w", Some("acceptEdits")).expect("cmd");
+            assert_eq!(
+                cmd,
+                "command claude --model opus --permission-mode acceptEdits --resume /t.jsonl"
+            );
+        }
+    }
+
+    /// No mode, or one claude would refuse, replays the argv as it stands:
+    /// a value claude rejects leaves the pane at a shell.
+    #[test]
+    fn no_mode_keeps_the_launch_mode() {
+        let launched = v(&["claude", "--permission-mode", "plan"]);
+        for mode in [None, Some("-"), Some("sideways")] {
+            let cmd = build_cmd(&launched, "/t.jsonl", "/w", "/w", mode).expect("cmd");
+            assert_eq!(
+                cmd,
+                "command claude --permission-mode plan --resume /t.jsonl"
+            );
+        }
+    }
+
+    /// Bypass stays on the cycle for a session launched with it, but only a
+    /// session still in bypass mode starts in it again.
+    #[test]
+    fn skipping_permissions_is_kept_only_for_a_session_still_in_bypass() {
+        let launched = v(&["claude", "--dangerously-skip-permissions"]);
+        let cmd = build_cmd(&launched, "", "/w", "/w", Some("plan")).expect("cmd");
+        assert_eq!(
+            cmd,
+            "command claude --allow-dangerously-skip-permissions --permission-mode plan"
+        );
+        let cmd = build_cmd(&launched, "", "/w", "/w", Some("bypassPermissions")).expect("cmd");
+        assert_eq!(
+            cmd,
+            "command claude --dangerously-skip-permissions --permission-mode bypassPermissions"
+        );
+        // never two of the allow flag
+        let both = v(&[
+            "claude",
+            "--allow-dangerously-skip-permissions",
+            "--dangerously-skip-permissions",
+        ]);
+        let cmd = build_cmd(&both, "", "/w", "/w", Some("auto")).expect("cmd");
+        assert_eq!(
+            cmd,
+            "command claude --allow-dangerously-skip-permissions --permission-mode auto"
+        );
+        // and with no mode known, nothing about it changes
+        let cmd = build_cmd(&launched, "", "/w", "/w", None).expect("cmd");
+        assert_eq!(cmd, "command claude --dangerously-skip-permissions");
+    }
+
+    /// The footer outranks the hook line, which only knows the last turn's mode,
+    /// and the hook line fills in only where the footer names nothing.
+    #[test]
+    fn the_footer_outranks_the_hook_line() {
+        let rule = "────────────────────────────────";
+        let auto = format!("out\n{rule}\n❯ \n{rule}\n  ⏵⏵ auto mode on (shift+tab to cycle)\n");
+        assert_eq!(
+            current_mode(&auto, Some("default")).as_deref(),
+            Some("auto")
+        );
+        let blank = format!("out\n{rule}\n❯ \n{rule}\n\n");
+        assert_eq!(current_mode(&blank, Some("plan")).as_deref(), Some("plan"));
+        assert_eq!(current_mode(&blank, Some("-")), None);
+        assert_eq!(current_mode(&blank, None), None);
     }
 }
+
+/// A pane's state and the permission mode its session is in, by pane id and
+/// agent pid: what `print_cmds` needs to know about a pane beyond its argv.
+pub type Look = dyn Fn(&str, i32) -> (String, Option<String>);
 
 /// One record per claude pane: where it is, whether its conversation could be
 /// identified, why, and the command that would put it back.
@@ -802,7 +971,13 @@ mod ladder_tests {
 /// This is what `resurrect` rewrites a save file from and what `restart` decides
 /// from, so the format is load-bearing and the equivalence bar for it is byte
 /// identity across every live pane.
-pub fn print_cmds(rows: &str, state_of: &dyn Fn(&str, i32) -> String) -> String {
+///
+/// `look` is a pane's state and its permission mode (`panes::look`), off one
+/// capture. The mode rides on the command, so a restore puts a session back in
+/// the mode it was saved in, rather than in whatever its argv launched it in:
+/// after a `restart` that is the mode it was in at the time, with its own
+/// `--permission-mode`.
+pub fn print_cmds(rows: &str, look: &Look) -> String {
     let mut out = String::new();
     // Resuming one conversation into two panes is as wrong on a restore as it is
     // on a restart, so the second pane to claim a transcript gets a fresh session.
@@ -830,7 +1005,7 @@ pub fn print_cmds(rows: &str, state_of: &dyn Fn(&str, i32) -> String) -> String 
             continue;
         }
 
-        let state = state_of(id, pid);
+        let (state, mode) = look(id, pid);
         let ccwd = std::fs::read_link(format!("/proc/{}/cwd", pid))
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default();
@@ -858,7 +1033,7 @@ pub fn print_cmds(rows: &str, state_of: &dyn Fn(&str, i32) -> String) -> String 
             }
         }
 
-        let cmd = match build_cmd(&argv_of(pid), &transcript, &ccwd, cwd) {
+        let cmd = match build_cmd(&argv_of(pid), &transcript, &ccwd, cwd, mode.as_deref()) {
             Some(c) => c,
             None => {
                 status = "unresolved";

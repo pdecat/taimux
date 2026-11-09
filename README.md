@@ -1536,6 +1536,22 @@ The dialog check is **never** skipped, `--include-busy` or not: an `Enter` sent 
 a pane showing a permission prompt picks its highlighted option and approves a
 tool call nobody approved.
 
+A restarted session comes back in the **permission mode it is in**, auto, manual,
+plan or accept edits, rather than the one it was launched in. A plain `--resume`
+does not carry it: measured on 2.1.319, a session left in accept-edits mode came
+back in the startup default, which with `defaultMode: "default"` put every
+session flipped to auto back in manual. So the command gets the current mode as
+`--permission-mode`, replacing any the session was launched with. It is read
+off the footer under the prompt box first, `⏵⏵ auto mode on (shift+tab to
+cycle)`, because a `shift+tab` at an idle prompt fires no hook and writes nothing
+to the transcript, so the footer is the only thing that moves; and a restart
+only acts on an idle pane with no dialog over it, which is exactly when that
+footer can be read. The hook line's mode, the mode of the session's last turn,
+fills in where the footer names nothing, and with neither the argv is replayed
+as it stands. A session launched with `--dangerously-skip-permissions` keeps
+bypass on its `shift+tab` cycle through `--allow-dangerously-skip-permissions`,
+and starts in bypass again only if it is still in it.
+
 A pane showing a [background session](#in-claude-codes-own-words) is judged by
 the version of the worker running it, as its row is, and is **never** restarted,
 however far behind that worker is: retyping the pane would resume the transcript
@@ -1600,6 +1616,11 @@ the **tilde** form: without `~` resurrect anchors the match at the start of the
 string, and a rewritten command legitimately begins `cd <dir> &&`. A trailing
 space inside the pattern is the other half of that trap, since
 `"~command claude "` never matches a flagless `command claude`.
+
+Each command also carries the session's **permission mode at save time**, read
+the way [`restart`](#taimux-restart) reads it, so a restore brings a session back
+in auto, plan or whatever it was in rather than in the mode its argv launched it
+with, which after a restart would be the mode it was in back then.
 
 A pane whose conversation cannot be identified comes back as a **fresh** `claude`
 in the right directory with the same flags, rather than as the bare shell
