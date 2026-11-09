@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.0](https://github.com/pdecat/taimux/compare/v0.23.1...v0.24.0) (2026-11-09)
+
+
+### Features
+
+* a restarted session keeps the permission mode it is in ([4a8fa4d](https://github.com/pdecat/taimux/commit/4a8fa4d87bb2719c78c28839e950882e6304ff61))
+* the working list takes the sessions running background work ([8fefecd](https://github.com/pdecat/taimux/commit/8fefecd1d97291ead34ec663fef46aaec41117a8))
+
 ## [0.23.1](https://github.com/pdecat/taimux/compare/v0.23.0...v0.23.1) (2026-10-30)
 
 
